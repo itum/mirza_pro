@@ -12260,23 +12260,27 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     // بررسی اینکه آیا کاربر skip کرده است
     if ($text == "/skip" || $text == "/رد" || $text == "skip" || $text == "رد") {
         // بدون فایل ادامه می‌دهیم
-    } elseif (isset($photo) && !empty($photo)) {
+    } elseif (isset($photo) && !empty($photo) && is_array($photo) && count($photo) > 0) {
         // دریافت فایل تصویر
-        $file_info = getFileddire($photo[count($photo) - 1]['file_id']);
-        if ($file_info['ok']) {
+        $file_id = $photo[count($photo) - 1]['file_id'];
+        $file_info = getFileddire($file_id);
+        if ($file_info && isset($file_info['ok']) && $file_info['ok']) {
             $file_path = $file_info['result']['file_path'];
             $file_url = "https://api.telegram.org/file/bot" . $APIKEY . "/" . $file_path;
             $expenses_dir = __DIR__ . '/expenses_documents';
             if (!is_dir($expenses_dir)) {
                 mkdir($expenses_dir, 0755, true);
             }
-            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION);
+            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION) ?: 'jpg';
             $file_name = 'expense_' . time() . '_' . $from_id . '.' . $file_extension;
             $local_path = $expenses_dir . '/' . $file_name;
-            file_put_contents($local_path, file_get_contents($file_url));
-            $document_path = 'expenses_documents/' . $file_name;
+            $file_content = @file_get_contents($file_url);
+            if ($file_content !== false) {
+                file_put_contents($local_path, $file_content);
+                $document_path = 'expenses_documents/' . $file_name;
+            }
         }
-    } elseif (isset($document) && !empty($document)) {
+    } elseif (isset($document) && !empty($document) && isset($document['file_id'])) {
         // دریافت فایل PDF یا سند
         $file_info = getFileddire($document['file_id']);
         if ($file_info['ok']) {
