@@ -12450,8 +12450,10 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     ];
     
     require_once __DIR__ . '/jdf.php';
-    $created_date = jdate('Y/m/d H:i:s', strtotime($expense['created_at']));
-    $updated_date = !empty($expense['updated_at']) ? jdate('Y/m/d H:i:s', strtotime($expense['updated_at'])) : 'هنوز ویرایش نشده';
+    $created_timestamp = strtotime($expense['created_at']);
+    $created_date = $created_timestamp !== false ? jdate('Y/m/d H:i:s', $created_timestamp) : 'نامشخص';
+    $updated_timestamp = !empty($expense['updated_at']) ? strtotime($expense['updated_at']) : false;
+    $updated_date = $updated_timestamp !== false ? jdate('Y/m/d H:i:s', $updated_timestamp) : 'هنوز ویرایش نشده';
     
     $type_name = $type_names[$expense['type']] ?? $expense['type'];
     $amount_formatted = number_format(floatval($expense['amount']), 0);
