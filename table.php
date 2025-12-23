@@ -1635,3 +1635,97 @@ $connect->query("ALTER TABLE help MODIFY name_os VARCHAR(500) COLLATE utf8mb4_bi
 telegram('setwebhook', [
     'url' => "https://$domainhosts/index.php"
 ]);
+
+// نمایش پیام موفقیت
+echo "<!DOCTYPE html>
+<html dir='rtl' lang='fa'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>نتیجه اجرای table.php</title>
+    <style>
+        body {
+            font-family: 'Tahoma', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .list {
+            list-style: none;
+            padding: 0;
+        }
+        .list li {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-right: 3px solid #667eea;
+        }
+        .list li:before {
+            content: '✅ ';
+            color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>✅ اجرای table.php با موفقیت انجام شد</h1>
+        <div class='success'>
+            <strong>تمام جداول و فیلدهای جدید با موفقیت ایجاد شدند!</strong>
+        </div>
+        <div class='info'>
+            <strong>جداول ایجاد شده:</strong>
+            <ul class='list'>
+                <li>statistics_excluded (پرداخت‌های بدون آمار)</li>
+                <li>expenses (هزینه‌ها)</li>
+                <li>partners (شرکا)</li>
+                <li>monthly_settlements (تسویه‌های ماهیانه)</li>
+                <li>partner_shares (سهم شرکا)</li>
+            </ul>
+        </div>
+        <div class='info'>
+            <strong>فیلدهای اضافه شده:</strong>
+            <ul class='list'>
+                <li>exclude_from_statistics در Payment_report</li>
+                <li>statistics_password در setting</li>
+            </ul>
+        </div>
+        <div class='success' style='margin-top: 20px; text-align: center;'>
+            <strong>سیستم آماده استفاده است! 🎉</strong>
+        </div>
+    </div>
+</body>
+</html>";
