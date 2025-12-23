@@ -12464,13 +12464,17 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $text .= "💵 <b>مبلغ:</b> $amount_formatted تومان\n";
     $text .= "📝 <b>توضیحات:</b> $desc\n";
     if ($expense['type'] == 'server' && !empty($expense['start_date']) && !empty($expense['end_date'])) {
-        $start_jalali = jdate('Y/m/d', strtotime($expense['start_date']));
-        $end_jalali = jdate('Y/m/d', strtotime($expense['end_date']));
-        $days_remaining = intval((strtotime($expense['end_date']) - time()) / 86400);
-        $status_icon = $days_remaining > 7 ? "🟢" : ($days_remaining > 0 ? "🟡" : "🔴");
-        $text .= "📅 <b>تاریخ شروع:</b> $start_jalali\n";
-        $text .= "📅 <b>تاریخ پایان:</b> $end_jalali\n";
-        $text .= "$status_icon <b>روزهای باقی‌مانده:</b> " . ($days_remaining > 0 ? "$days_remaining روز" : "منقضی شده") . "\n";
+        $start_timestamp = strtotime($expense['start_date']);
+        $end_timestamp = strtotime($expense['end_date']);
+        if ($start_timestamp !== false && $end_timestamp !== false) {
+            $start_jalali = jdate('Y/m/d', $start_timestamp);
+            $end_jalali = jdate('Y/m/d', $end_timestamp);
+            $days_remaining = intval(($end_timestamp - time()) / 86400);
+            $status_icon = $days_remaining > 7 ? "🟢" : ($days_remaining > 0 ? "🟡" : "🔴");
+            $text .= "📅 <b>تاریخ شروع:</b> $start_jalali\n";
+            $text .= "📅 <b>تاریخ پایان:</b> $end_jalali\n";
+            $text .= "$status_icon <b>روزهای باقی‌مانده:</b> " . ($days_remaining > 0 ? "$days_remaining روز" : "منقضی شده") . "\n";
+        }
     }
     $text .= "$doc_text\n";
     $text .= "📅 <b>تاریخ ثبت:</b> $created_date\n";
