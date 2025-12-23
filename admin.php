@@ -12189,12 +12189,76 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $current_month = getJalaliMonth();
     $current_time = date('Y-m-d H:i:s');
     
-    $stmt = $pdo->prepare("INSERT INTO expenses (type, description, amount, month, admin_id, created_at) VALUES (:type, :description, :amount, :month, :admin_id, :created_at)");
+    // ذخیره اطلاعات برای مرحله بعد (آپلود فایل)
+    update("user", "Processing_value_three", $description, "id", $from_id);
+    sendmessage($from_id, "📎 <b>آپلود فاکتور (اختیاری)</b>\n\nمی‌توانید تصویر یا PDF فاکتور خرید را ارسال کنید.\nیا /skip را بزنید تا رد کنید:", null, 'HTML');
+    step("get_expense_document", $from_id);
+} elseif ($user['step'] == "get_expense_document") {
+    require_once __DIR__ . '/jdf.php';
+    $expense_type = $user['Processing_value'];
+    $expense_amount = $user['Processing_value_tow'];
+    $description = $user['Processing_value_three'] ?? "";
+    $current_month = getJalaliMonth();
+    $current_time = date('Y-m-d H:i:s');
+    $document_path = null;
+    
+    // بررسی اینکه آیا کاربر skip کرده است
+    if ($text == "/skip" || $text == "/رد" || $text == "skip" || $text == "رد") {
+        // بدون فایل ادامه می‌دهیم
+    } elseif (isset($photo) && !empty($photo)) {
+        // دریافت فایل تصویر
+        $file_info = getFileddire($photo[count($photo) - 1]['file_id']);
+        if ($file_info['ok']) {
+            $file_path = $file_info['result']['file_path'];
+            $file_url = "https://api.telegram.org/file/bot" . $APIKEY . "/" . $file_path;
+            $expenses_dir = __DIR__ . '/expenses_documents';
+            if (!is_dir($expenses_dir)) {
+                mkdir($expenses_dir, 0755, true);
+            }
+            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION);
+            $file_name = 'expense_' . time() . '_' . $from_id . '.' . $file_extension;
+            $local_path = $expenses_dir . '/' . $file_name;
+            file_put_contents($local_path, file_get_contents($file_url));
+            $document_path = 'expenses_documents/' . $file_name;
+        }
+    } elseif (isset($document) && !empty($document)) {
+        // دریافت فایل PDF یا سند
+        $file_info = getFileddire($document['file_id']);
+        if ($file_info['ok']) {
+            $file_path = $file_info['result']['file_path'];
+            $file_url = "https://api.telegram.org/file/bot" . $APIKEY . "/" . $file_path;
+            $expenses_dir = __DIR__ . '/expenses_documents';
+            if (!is_dir($expenses_dir)) {
+                mkdir($expenses_dir, 0755, true);
+            }
+            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION);
+            $file_name = 'expense_' . time() . '_' . $from_id . '.' . $file_extension;
+            $local_path = $expenses_dir . '/' . $file_name;
+            file_put_contents($local_path, file_get_contents($file_url));
+            $document_path = 'expenses_documents/' . $file_name;
+        }
+    }
+    
+    $stmt = $pdo->prepare("INSERT INTO expenses (type, description, amount, month, admin_id, document_path, created_at) VALUES (:type, :description, :amount, :month, :admin_id, :document_path, :created_at)");
     $stmt->bindParam(':type', $expense_type);
     $stmt->bindParam(':description', $description);
     $stmt->bindParam(':amount', $expense_amount);
     $stmt->bindParam(':month', $current_month);
     $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':document_path', $document_path);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $expense_id = $pdo->lastInsertId();
+    
+    // ثبت لاگ ایجاد
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, new_type, new_amount, new_description, new_document_path, created_at) VALUES (:expense_id, 'create', :admin_id, :new_type, :new_amount, :new_description, :new_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':new_type', $expense_type);
+    $stmt->bindParam(':new_amount', $expense_amount);
+    $stmt->bindParam(':new_description', $description);
+    $stmt->bindParam(':new_document_path', $document_path);
     $stmt->bindParam(':created_at', $current_time);
     $stmt->execute();
     
@@ -12208,11 +12272,13 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     ];
     $type_name = $type_names[$expense_type] ?? $expense_type;
     $amount_formatted = number_format(floatval($expense_amount), 0);
+    $doc_text = $document_path ? "\n📎 فاکتور با موفقیت آپلود شد." : "";
     
-    sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.", $keyboard_stat, 'HTML');
+    sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.$doc_text", $keyboard_stat, 'HTML');
     step("home", $from_id);
     update("user", "Processing_value", "none", "id", $from_id);
     update("user", "Processing_value_tow", "none", "id", $from_id);
+    update("user", "Processing_value_three", "none", "id", $from_id);
 } elseif ($datain == "list_expenses") {
     // لیست هزینه‌ها
     require_once __DIR__ . '/jdf.php';
@@ -12236,26 +12302,579 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $text = "💰 <b>لیست هزینه‌های ماه $current_month</b>\n━━━━━━━━━━━━━━━━━━\n";
     if (count($expenses) == 0) {
         $text .= "❌ هیچ هزینه‌ای ثبت نشده است.";
+        $expense_keyboard = json_encode([
+            'inline_keyboard' => [
+                [
+                    ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_expenses'],
+                ]
+            ]
+        ]);
+        Editmessagetext($from_id, $message_id, $text, $expense_keyboard, 'HTML');
     } else {
+        $keyboard_buttons = [];
         foreach ($expenses as $expense) {
             $type_name = $type_names[$expense['type']] ?? $expense['type'];
             $amount = number_format(floatval($expense['amount']), 0);
             $total += floatval($expense['amount']);
-            $desc = !empty($expense['description']) ? "\n   📝 " . $expense['description'] : "";
-            $text .= "$type_name: $amount تومان$desc\n";
+            $desc = !empty($expense['description']) ? " - " . mb_substr($expense['description'], 0, 30) . (mb_strlen($expense['description']) > 30 ? '...' : '') : "";
+            $doc_icon = !empty($expense['document_path']) ? " 📎" : "";
+            $text .= "$type_name: $amount تومان$desc$doc_icon\n";
+            
+            $keyboard_buttons[] = [
+                ['text' => "$type_name: $amount تومان", 'callback_data' => 'expense_detail_' . $expense['id']]
+            ];
         }
         $text .= "\n━━━━━━━━━━━━━━━━━━\n";
         $text .= "💵 <b>جمع کل:</b> " . number_format($total, 0) . " تومان";
+        
+        $keyboard_buttons[] = [
+            ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_expenses'],
+        ];
+        
+        $expense_keyboard = json_encode([
+            'inline_keyboard' => $keyboard_buttons
+        ]);
+        Editmessagetext($from_id, $message_id, $text, $expense_keyboard, 'HTML');
+    }
+} elseif (preg_match('/expense_detail_(\d+)/', $datain, $matches)) {
+    // نمایش جزئیات هزینه
+    $expense_id = intval($matches[1]);
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        return;
     }
     
-    $expense_keyboard = json_encode([
+    $type_names = [
+        'server' => '🖥️ سرور',
+        'traffic' => '📊 ترافیک',
+        'node' => '🌐 نود',
+        'domain' => '🌍 دامنه',
+        'support' => '💬 پشتیبانی',
+        'other' => '📝 متفرقه'
+    ];
+    
+    require_once __DIR__ . '/jdf.php';
+    $created_date = jdate('Y/m/d H:i:s', strtotime($expense['created_at']));
+    $updated_date = !empty($expense['updated_at']) ? jdate('Y/m/d H:i:s', strtotime($expense['updated_at'])) : 'هنوز ویرایش نشده';
+    
+    $type_name = $type_names[$expense['type']] ?? $expense['type'];
+    $amount_formatted = number_format(floatval($expense['amount']), 0);
+    $desc = !empty($expense['description']) ? $expense['description'] : 'بدون توضیحات';
+    $doc_text = !empty($expense['document_path']) ? "\n📎 <b>فاکتور:</b> موجود است" : "\n📎 <b>فاکتور:</b> آپلود نشده";
+    
+    $text = "💰 <b>جزئیات هزینه</b>\n━━━━━━━━━━━━━━━━━━\n";
+    $text .= "🆔 <b>شناسه:</b> <code>{$expense['id']}</code>\n";
+    $text .= "📌 <b>نوع:</b> $type_name\n";
+    $text .= "💵 <b>مبلغ:</b> $amount_formatted تومان\n";
+    $text .= "📝 <b>توضیحات:</b> $desc\n";
+    $text .= "$doc_text\n";
+    $text .= "📅 <b>تاریخ ثبت:</b> $created_date\n";
+    $text .= "🔄 <b>آخرین ویرایش:</b> $updated_date\n";
+    $text .= "👤 <b>ثبت کننده:</b> <code>{$expense['admin_id']}</code>\n";
+    
+    $detail_keyboard = json_encode([
         'inline_keyboard' => [
             [
-                ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_expenses'],
+                ['text' => "✏️ ویرایش", 'callback_data' => 'edit_expense_' . $expense_id],
+                ['text' => "🗑️ حذف", 'callback_data' => 'delete_expense_' . $expense_id],
+            ],
+            [
+                ['text' => "📋 لاگ تغییرات", 'callback_data' => 'expense_log_' . $expense_id],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'list_expenses'],
             ]
         ]
     ]);
-    Editmessagetext($from_id, $message_id, $text, $expense_keyboard, 'HTML');
+    
+    if (!empty($expense['document_path']) && file_exists(__DIR__ . '/' . $expense['document_path'])) {
+        // ارسال فایل فاکتور
+        sendDocument($from_id, __DIR__ . '/' . $expense['document_path'], "📎 فاکتور هزینه");
+    }
+    
+    Editmessagetext($from_id, $message_id, $text, $detail_keyboard, 'HTML');
+} elseif (preg_match('/edit_expense_(\d+)/', $datain, $matches)) {
+    // ویرایش هزینه
+    $expense_id = intval($matches[1]);
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        return;
+    }
+    
+    update("user", "Processing_value", $expense_id, "id", $from_id);
+    update("user", "Processing_value_one", $expense['type'], "id", $from_id);
+    update("user", "Processing_value_tow", $expense['amount'], "id", $from_id);
+    update("user", "Processing_value_three", $expense['description'] ?? "", "id", $from_id);
+    
+    $type_names = [
+        'server' => '🖥️ سرور',
+        'traffic' => '📊 ترافیک',
+        'node' => '🌐 نود',
+        'domain' => '🌍 دامنه',
+        'support' => '💬 پشتیبانی',
+        'other' => '📝 متفرقه'
+    ];
+    
+    $edit_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "✏️ ویرایش نوع", 'callback_data' => 'edit_expense_type_' . $expense_id],
+                ['text' => "✏️ ویرایش مبلغ", 'callback_data' => 'edit_expense_amount_' . $expense_id],
+            ],
+            [
+                ['text' => "✏️ ویرایش توضیحات", 'callback_data' => 'edit_expense_desc_' . $expense_id],
+                ['text' => "📎 تغییر فاکتور", 'callback_data' => 'edit_expense_doc_' . $expense_id],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'expense_detail_' . $expense_id],
+            ]
+        ]
+    ]);
+    
+    $type_name = $type_names[$expense['type']] ?? $expense['type'];
+    $amount_formatted = number_format(floatval($expense['amount']), 0);
+    
+    $text = "✏️ <b>ویرایش هزینه</b>\n━━━━━━━━━━━━━━━━━━\n";
+    $text .= "📌 <b>نوع فعلی:</b> $type_name\n";
+    $text .= "💵 <b>مبلغ فعلی:</b> $amount_formatted تومان\n";
+    $text .= "📝 <b>توضیحات فعلی:</b> " . (!empty($expense['description']) ? $expense['description'] : 'بدون توضیحات') . "\n";
+    $text .= "\nیکی از گزینه‌های زیر را انتخاب کنید:";
+    
+    Editmessagetext($from_id, $message_id, $text, $edit_keyboard, 'HTML');
+} elseif (preg_match('/edit_expense_type_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    $expense_type_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "🖥️ سرور", 'callback_data' => 'save_expense_type_server_' . $expense_id],
+                ['text' => "📊 ترافیک", 'callback_data' => 'save_expense_type_traffic_' . $expense_id],
+            ],
+            [
+                ['text' => "🌐 نود", 'callback_data' => 'save_expense_type_node_' . $expense_id],
+                ['text' => "🌍 دامنه", 'callback_data' => 'save_expense_type_domain_' . $expense_id],
+            ],
+            [
+                ['text' => "💬 پشتیبانی", 'callback_data' => 'save_expense_type_support_' . $expense_id],
+                ['text' => "📝 متفرقه", 'callback_data' => 'save_expense_type_other_' . $expense_id],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'edit_expense_' . $expense_id],
+            ]
+        ]
+    ]);
+    sendmessage($from_id, "📌 نوع جدید هزینه را انتخاب کنید:", $expense_type_keyboard, 'HTML');
+} elseif (preg_match('/save_expense_type_(\w+)_(\d+)/', $datain, $matches)) {
+    $new_type = $matches[1];
+    $expense_id = intval($matches[2]);
+    
+    // دریافت اطلاعات قبلی
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $old_expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$old_expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        return;
+    }
+    
+    // به‌روزرسانی
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("UPDATE expenses SET type = :type, updated_at = :updated_at WHERE id = :id");
+    $stmt->bindParam(':type', $new_type);
+    $stmt->bindParam(':updated_at', $current_time);
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    
+    // ثبت لاگ
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, old_type, new_type, old_amount, new_amount, old_description, new_description, old_document_path, new_document_path, created_at) VALUES (:expense_id, 'update', :admin_id, :old_type, :new_type, :old_amount, :new_amount, :old_description, :new_description, :old_document_path, :new_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':old_type', $old_expense['type']);
+    $stmt->bindParam(':new_type', $new_type);
+    $stmt->bindParam(':old_amount', $old_expense['amount']);
+    $stmt->bindParam(':new_amount', $old_expense['amount']);
+    $stmt->bindParam(':old_description', $old_expense['description']);
+    $stmt->bindParam(':new_description', $old_expense['description']);
+    $stmt->bindParam(':old_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':new_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $type_names = [
+        'server' => 'سرور',
+        'traffic' => 'ترافیک',
+        'node' => 'نود',
+        'domain' => 'دامنه',
+        'support' => 'پشتیبانی',
+        'other' => 'متفرقه'
+    ];
+    
+    $old_type_name = $type_names[$old_expense['type']] ?? $old_expense['type'];
+    $new_type_name = $type_names[$new_type] ?? $new_type;
+    
+    sendmessage($from_id, "✅ نوع هزینه از <b>$old_type_name</b> به <b>$new_type_name</b> تغییر یافت.", null, 'HTML');
+    // نمایش مجدد جزئیات
+    $datain = "expense_detail_" . $expense_id;
+    // این handler بعداً اجرا می‌شود
+} elseif (preg_match('/edit_expense_amount_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    update("user", "Processing_value", $expense_id, "id", $from_id);
+    sendmessage($from_id, "💰 مبلغ جدید هزینه را وارد کنید (به تومان):", null, 'HTML');
+    step("edit_expense_amount_step", $from_id);
+} elseif ($user['step'] == "edit_expense_amount_step") {
+    if (!is_numeric($text)) {
+        sendmessage($from_id, "❌ لطفاً یک عدد معتبر وارد کنید:", null, 'HTML');
+        return;
+    }
+    $expense_id = $user['Processing_value'];
+    $new_amount = $text;
+    
+    // دریافت اطلاعات قبلی
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $old_expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$old_expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        step("home", $from_id);
+        return;
+    }
+    
+    // به‌روزرسانی
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("UPDATE expenses SET amount = :amount, updated_at = :updated_at WHERE id = :id");
+    $stmt->bindParam(':amount', $new_amount);
+    $stmt->bindParam(':updated_at', $current_time);
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    
+    // ثبت لاگ
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, old_type, new_type, old_amount, new_amount, old_description, new_description, old_document_path, new_document_path, created_at) VALUES (:expense_id, 'update', :admin_id, :old_type, :new_type, :old_amount, :new_amount, :old_description, :new_description, :old_document_path, :new_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':old_type', $old_expense['type']);
+    $stmt->bindParam(':new_type', $old_expense['type']);
+    $stmt->bindParam(':old_amount', $old_expense['amount']);
+    $stmt->bindParam(':new_amount', $new_amount);
+    $stmt->bindParam(':old_description', $old_expense['description']);
+    $stmt->bindParam(':new_description', $old_expense['description']);
+    $stmt->bindParam(':old_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':new_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $old_amount_formatted = number_format(floatval($old_expense['amount']), 0);
+    $new_amount_formatted = number_format(floatval($new_amount), 0);
+    
+    sendmessage($from_id, "✅ مبلغ هزینه از <b>$old_amount_formatted تومان</b> به <b>$new_amount_formatted تومان</b> تغییر یافت.", null, 'HTML');
+    step("home", $from_id);
+    update("user", "Processing_value", "none", "id", $from_id);
+} elseif (preg_match('/edit_expense_desc_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    update("user", "Processing_value", $expense_id, "id", $from_id);
+    sendmessage($from_id, "📝 توضیحات جدید را وارد کنید (یا /skip برای حذف توضیحات):", null, 'HTML');
+    step("edit_expense_desc_step", $from_id);
+} elseif ($user['step'] == "edit_expense_desc_step") {
+    $expense_id = $user['Processing_value'];
+    $new_description = ($text == "/skip" || $text == "/رد") ? "" : $text;
+    
+    // دریافت اطلاعات قبلی
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $old_expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$old_expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        step("home", $from_id);
+        return;
+    }
+    
+    // به‌روزرسانی
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("UPDATE expenses SET description = :description, updated_at = :updated_at WHERE id = :id");
+    $stmt->bindParam(':description', $new_description);
+    $stmt->bindParam(':updated_at', $current_time);
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    
+    // ثبت لاگ
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, old_type, new_type, old_amount, new_amount, old_description, new_description, old_document_path, new_document_path, created_at) VALUES (:expense_id, 'update', :admin_id, :old_type, :new_type, :old_amount, :new_amount, :old_description, :new_description, :old_document_path, :new_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':old_type', $old_expense['type']);
+    $stmt->bindParam(':new_type', $old_expense['type']);
+    $stmt->bindParam(':old_amount', $old_expense['amount']);
+    $stmt->bindParam(':new_amount', $old_expense['amount']);
+    $stmt->bindParam(':old_description', $old_expense['description']);
+    $stmt->bindParam(':new_description', $new_description);
+    $stmt->bindParam(':old_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':new_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $old_desc = !empty($old_expense['description']) ? $old_expense['description'] : 'بدون توضیحات';
+    $new_desc = !empty($new_description) ? $new_description : 'بدون توضیحات';
+    
+    sendmessage($from_id, "✅ توضیحات از <b>$old_desc</b> به <b>$new_desc</b> تغییر یافت.", null, 'HTML');
+    step("home", $from_id);
+    update("user", "Processing_value", "none", "id", $from_id);
+} elseif (preg_match('/edit_expense_doc_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    update("user", "Processing_value", $expense_id, "id", $from_id);
+    sendmessage($from_id, "📎 تصویر یا PDF فاکتور جدید را ارسال کنید (یا /skip برای حذف فاکتور):", null, 'HTML');
+    step("edit_expense_doc_step", $from_id);
+} elseif ($user['step'] == "edit_expense_doc_step") {
+    $expense_id = $user['Processing_value'];
+    $new_document_path = null;
+    
+    // بررسی اینکه آیا کاربر skip کرده است
+    if ($text == "/skip" || $text == "/رد" || $text == "skip" || $text == "رد") {
+        // حذف فاکتور
+        $new_document_path = null;
+    } elseif (isset($photo) && !empty($photo)) {
+        $file_info = getFileddire($photo[count($photo) - 1]['file_id']);
+        if ($file_info['ok']) {
+            $file_path = $file_info['result']['file_path'];
+            $file_url = "https://api.telegram.org/file/bot" . $APIKEY . "/" . $file_path;
+            $expenses_dir = __DIR__ . '/expenses_documents';
+            if (!is_dir($expenses_dir)) {
+                mkdir($expenses_dir, 0755, true);
+            }
+            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION);
+            $file_name = 'expense_' . time() . '_' . $from_id . '.' . $file_extension;
+            $local_path = $expenses_dir . '/' . $file_name;
+            file_put_contents($local_path, file_get_contents($file_url));
+            $new_document_path = 'expenses_documents/' . $file_name;
+        }
+    } elseif (isset($document) && !empty($document)) {
+        $file_info = getFileddire($document['file_id']);
+        if ($file_info['ok']) {
+            $file_path = $file_info['result']['file_path'];
+            $file_url = "https://api.telegram.org/file/bot" . $APIKEY . "/" . $file_path;
+            $expenses_dir = __DIR__ . '/expenses_documents';
+            if (!is_dir($expenses_dir)) {
+                mkdir($expenses_dir, 0755, true);
+            }
+            $file_extension = pathinfo($file_path, PATHINFO_EXTENSION);
+            $file_name = 'expense_' . time() . '_' . $from_id . '.' . $file_extension;
+            $local_path = $expenses_dir . '/' . $file_name;
+            file_put_contents($local_path, file_get_contents($file_url));
+            $new_document_path = 'expenses_documents/' . $file_name;
+        }
+    }
+    
+    // دریافت اطلاعات قبلی
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $old_expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$old_expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        step("home", $from_id);
+        return;
+    }
+    
+    // حذف فایل قدیمی اگر وجود داشت
+    if (!empty($old_expense['document_path']) && file_exists(__DIR__ . '/' . $old_expense['document_path'])) {
+        @unlink(__DIR__ . '/' . $old_expense['document_path']);
+    }
+    
+    // به‌روزرسانی
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("UPDATE expenses SET document_path = :document_path, updated_at = :updated_at WHERE id = :id");
+    $stmt->bindParam(':document_path', $new_document_path);
+    $stmt->bindParam(':updated_at', $current_time);
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    
+    // ثبت لاگ
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, old_type, new_type, old_amount, new_amount, old_description, new_description, old_document_path, new_document_path, created_at) VALUES (:expense_id, 'update', :admin_id, :old_type, :new_type, :old_amount, :new_amount, :old_description, :new_description, :old_document_path, :new_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':old_type', $old_expense['type']);
+    $stmt->bindParam(':new_type', $old_expense['type']);
+    $stmt->bindParam(':old_amount', $old_expense['amount']);
+    $stmt->bindParam(':new_amount', $old_expense['amount']);
+    $stmt->bindParam(':old_description', $old_expense['description']);
+    $stmt->bindParam(':new_description', $old_expense['description']);
+    $stmt->bindParam(':old_document_path', $old_expense['document_path']);
+    $stmt->bindParam(':new_document_path', $new_document_path);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    if ($new_document_path) {
+        sendmessage($from_id, "✅ فاکتور جدید با موفقیت آپلود شد.", null, 'HTML');
+    } else {
+        sendmessage($from_id, "✅ فاکتور حذف شد.", null, 'HTML');
+    }
+    step("home", $from_id);
+    update("user", "Processing_value", "none", "id", $from_id);
+} elseif (preg_match('/delete_expense_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    
+    $delete_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "✅ بله، حذف کن", 'callback_data' => 'confirm_delete_expense_' . $expense_id],
+                ['text' => "❌ خیر، انصراف", 'callback_data' => 'expense_detail_' . $expense_id],
+            ]
+        ]
+    ]);
+    
+    sendmessage($from_id, "⚠️ <b>تایید حذف</b>\n\nآیا مطمئن هستید که می‌خواهید این هزینه را حذف کنید؟\n\nاین عمل غیرقابل بازگشت است!", $delete_keyboard, 'HTML');
+} elseif (preg_match('/confirm_delete_expense_(\d+)/', $datain, $matches)) {
+    $expense_id = intval($matches[1]);
+    
+    // دریافت اطلاعات برای لاگ
+    $stmt = $pdo->prepare("SELECT * FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $expense = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$expense) {
+        sendmessage($from_id, "❌ هزینه یافت نشد.", null, 'HTML');
+        return;
+    }
+    
+    // ثبت لاگ حذف
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("INSERT INTO expenses_log (expense_id, action, admin_id, old_type, old_amount, old_description, old_document_path, created_at) VALUES (:expense_id, 'delete', :admin_id, :old_type, :old_amount, :old_description, :old_document_path, :created_at)");
+    $stmt->bindParam(':expense_id', $expense_id);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':old_type', $expense['type']);
+    $stmt->bindParam(':old_amount', $expense['amount']);
+    $stmt->bindParam(':old_description', $expense['description']);
+    $stmt->bindParam(':old_document_path', $expense['document_path']);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    // حذف فایل فاکتور
+    if (!empty($expense['document_path']) && file_exists(__DIR__ . '/' . $expense['document_path'])) {
+        @unlink(__DIR__ . '/' . $expense['document_path']);
+    }
+    
+    // حذف هزینه
+    $stmt = $pdo->prepare("DELETE FROM expenses WHERE id = :id");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    
+    sendmessage($from_id, "✅ هزینه با موفقیت حذف شد.", null, 'HTML');
+    // بازگشت به لیست
+    $datain = "list_expenses";
+} elseif (preg_match('/expense_log_(\d+)/', $datain, $matches)) {
+    // نمایش لاگ تغییرات
+    $expense_id = intval($matches[1]);
+    
+    $stmt = $pdo->prepare("SELECT * FROM expenses_log WHERE expense_id = :id ORDER BY created_at DESC");
+    $stmt->bindParam(':id', $expense_id);
+    $stmt->execute();
+    $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    require_once __DIR__ . '/jdf.php';
+    
+    $type_names = [
+        'server' => 'سرور',
+        'traffic' => 'ترافیک',
+        'node' => 'نود',
+        'domain' => 'دامنه',
+        'support' => 'پشتیبانی',
+        'other' => 'متفرقه'
+    ];
+    
+    $text = "📋 <b>لاگ تغییرات هزینه</b>\n━━━━━━━━━━━━━━━━━━\n";
+    
+    if (count($logs) == 0) {
+        $text .= "❌ هیچ تغییری ثبت نشده است.";
+    } else {
+        foreach ($logs as $log) {
+            $log_date = jdate('Y/m/d H:i:s', strtotime($log['created_at']));
+            $action_names = [
+                'create' => '➕ ایجاد',
+                'update' => '✏️ ویرایش',
+                'delete' => '🗑️ حذف'
+            ];
+            $action_name = $action_names[$log['action']] ?? $log['action'];
+            
+            $text .= "\n<b>$action_name</b> - $log_date\n";
+            $text .= "👤 ادمین: <code>{$log['admin_id']}</code>\n";
+            
+            if ($log['action'] == 'update') {
+                $changes = [];
+                if ($log['old_type'] != $log['new_type']) {
+                    $old_type_name = $type_names[$log['old_type']] ?? $log['old_type'];
+                    $new_type_name = $type_names[$log['new_type']] ?? $log['new_type'];
+                    $changes[] = "نوع: <b>$old_type_name</b> → <b>$new_type_name</b>";
+                }
+                if ($log['old_amount'] != $log['new_amount']) {
+                    $old_amount = number_format(floatval($log['old_amount']), 0);
+                    $new_amount = number_format(floatval($log['new_amount']), 0);
+                    $changes[] = "مبلغ: <b>$old_amount تومان</b> → <b>$new_amount تومان</b>";
+                }
+                if ($log['old_description'] != $log['new_description']) {
+                    $old_desc = !empty($log['old_description']) ? $log['old_description'] : 'بدون توضیحات';
+                    $new_desc = !empty($log['new_description']) ? $log['new_description'] : 'بدون توضیحات';
+                    $changes[] = "توضیحات: <b>$old_desc</b> → <b>$new_desc</b>";
+                }
+                if ($log['old_document_path'] != $log['new_document_path']) {
+                    if (empty($log['new_document_path'])) {
+                        $changes[] = "فاکتور: <b>حذف شد</b>";
+                    } elseif (empty($log['old_document_path'])) {
+                        $changes[] = "فاکتور: <b>اضافه شد</b>";
+                    } else {
+                        $changes[] = "فاکتور: <b>تغییر یافت</b>";
+                    }
+                }
+                
+                if (count($changes) > 0) {
+                    $text .= "تغییرات:\n";
+                    foreach ($changes as $change) {
+                        $text .= "  • $change\n";
+                    }
+                }
+            } elseif ($log['action'] == 'create') {
+                $type_name = $type_names[$log['new_type']] ?? $log['new_type'];
+                $amount = number_format(floatval($log['new_amount']), 0);
+                $text .= "نوع: <b>$type_name</b>\n";
+                $text .= "مبلغ: <b>$amount تومان</b>\n";
+                if (!empty($log['new_description'])) {
+                    $text .= "توضیحات: " . $log['new_description'] . "\n";
+                }
+                if (!empty($log['new_document_path'])) {
+                    $text .= "فاکتور: <b>موجود است</b>\n";
+                }
+            } elseif ($log['action'] == 'delete') {
+                $type_name = $type_names[$log['old_type']] ?? $log['old_type'];
+                $amount = number_format(floatval($log['old_amount']), 0);
+                $text .= "نوع: <b>$type_name</b>\n";
+                $text .= "مبلغ: <b>$amount تومان</b>\n";
+            }
+            $text .= "━━━━━━━━━━━━━━━━━━";
+        }
+    }
+    
+    $log_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'expense_detail_' . $expense_id],
+            ]
+        ]
+    ]);
+    
+    Editmessagetext($from_id, $message_id, $text, $log_keyboard, 'HTML');
 } elseif ($datain == "manage_partners") {
     // منوی مدیریت شراکت
     $partner_keyboard = json_encode([

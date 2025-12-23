@@ -1499,10 +1499,52 @@ try {
         amount varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
         month varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
         admin_id varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+        document_path varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        updated_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL
         )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         if (!$result) {
             echo "table expenses" . mysqli_error($connect);
+        }
+    } else {
+        // افزودن فیلدهای جدید به جدول موجود
+        $Check_filde = $connect->query("SHOW COLUMNS FROM expenses LIKE 'document_path'");
+        if (mysqli_num_rows($Check_filde) != 1) {
+            $result = $connect->query("ALTER TABLE expenses ADD document_path varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        }
+        $Check_filde = $connect->query("SHOW COLUMNS FROM expenses LIKE 'updated_at'");
+        if (mysqli_num_rows($Check_filde) != 1) {
+            $result = $connect->query("ALTER TABLE expenses ADD updated_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// جدول expenses_log - برای ذخیره لاگ تغییرات هزینه‌ها
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'expenses_log'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE expenses_log (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        expense_id INT(6) UNSIGNED NOT NULL,
+        action varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        admin_id varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        old_type varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        new_type varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        old_amount varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        new_amount varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        old_description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        new_description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        old_document_path varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        new_document_path varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE CASCADE
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table expenses_log" . mysqli_error($connect);
         }
     }
 } catch (Exception $e) {
