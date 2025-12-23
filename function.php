@@ -2148,8 +2148,8 @@ function calculateMonthlyStatistics($month = null) {
     $start_date = jalali_to_gregorian($j_year, $j_month, 1);
     $days_in_month = jdate('t', mktime(0, 0, 0, $j_month, 1, $j_year));
     $end_date = jalali_to_gregorian($j_year, $j_month, intval($days_in_month));
-    $start_timestamp = mktime(0, 0, 0, $start_date[1], $start_date[2], $start_date[0]);
-    $end_timestamp = mktime(23, 59, 59, $end_date[1], $end_date[2], $end_date[0]);
+    $start_timestamp = mktime(0, 0, 0, intval($start_date[1]), intval($start_date[2]), intval($start_date[0]));
+    $end_timestamp = mktime(23, 59, 59, intval($end_date[1]), intval($end_date[2]), intval($end_date[0]));
     
     // محاسبه درآمد کل (بدون پرداخت‌های بدون آمار)
     $sql = "SELECT SUM(CAST(price AS UNSIGNED)) as total_revenue, COUNT(*) as count 
@@ -2158,8 +2158,10 @@ function calculateMonthlyStatistics($month = null) {
             AND (exclude_from_statistics = FALSE OR exclude_from_statistics IS NULL)
             AND time BETWEEN :start_date AND :end_date";
     $stmt = $pdo->prepare($sql);
-    $stmt->bindParam(':start_date', date('Y-m-d H:i:s', $start_timestamp));
-    $stmt->bindParam(':end_date', date('Y-m-d H:i:s', $end_timestamp));
+    $start_date_str = date('Y-m-d H:i:s', $start_timestamp);
+    $end_date_str = date('Y-m-d H:i:s', $end_timestamp);
+    $stmt->bindParam(':start_date', $start_date_str);
+    $stmt->bindParam(':end_date', $end_date_str);
     $stmt->execute();
     $revenue = $stmt->fetch(PDO::FETCH_ASSOC);
     
@@ -2268,15 +2270,20 @@ function generateExcelReport($month = null) {
     $sheetB = $spreadsheet->createSheet();
     $sheetB->setTitle('جزئیات فروش');
     list($j_year, $j_month) = explode('-', $month);
+    $j_year = intval($j_year);
+    $j_month = intval($j_month);
     $start_date = jalali_to_gregorian($j_year, $j_month, 1);
-    $end_date = jalali_to_gregorian($j_year, $j_month, jdate('t', mktime(0, 0, 0, $j_month, 1, $j_year)));
-    $start_timestamp = mktime(0, 0, 0, $start_date[1], $start_date[2], $start_date[0]);
-    $end_timestamp = mktime(23, 59, 59, $end_date[1], $end_date[2], $end_date[0]);
+    $days_in_month = jdate('t', mktime(0, 0, 0, $j_month, 1, $j_year));
+    $end_date = jalali_to_gregorian($j_year, $j_month, intval($days_in_month));
+    $start_timestamp = mktime(0, 0, 0, intval($start_date[1]), intval($start_date[2]), intval($start_date[0]));
+    $end_timestamp = mktime(23, 59, 59, intval($end_date[1]), intval($end_date[2]), intval($end_date[0]));
     
     $sql = "SELECT * FROM Payment_report WHERE payment_Status = 'paid' AND (exclude_from_statistics = FALSE OR exclude_from_statistics IS NULL) AND time BETWEEN :start_date AND :end_date ORDER BY time DESC";
     $stmt = $pdo->prepare($sql);
-    $stmt->bindParam(':start_date', date('Y-m-d H:i:s', $start_timestamp));
-    $stmt->bindParam(':end_date', date('Y-m-d H:i:s', $end_timestamp));
+    $start_date_str = date('Y-m-d H:i:s', $start_timestamp);
+    $end_date_str = date('Y-m-d H:i:s', $end_timestamp);
+    $stmt->bindParam(':start_date', $start_date_str);
+    $stmt->bindParam(':end_date', $end_date_str);
     $stmt->execute();
     $sales = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
