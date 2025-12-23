@@ -265,28 +265,33 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     update("setting", "limit_usertest_all", $text);
 } elseif ($text == "📯 تنظیمات کانال" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['channel']['description'], $channelkeyboard, 'HTML');
-} elseif ($text == $textbotlang['Admin']['Status']['btn']) {
+} elseif ($user['step'] == 'verify_statistics_password') {
+    // بررسی پسورد آمار
+    $stmt = $pdo->prepare("SELECT statistics_password FROM setting LIMIT 1");
+    $stmt->execute();
+    $setting_pass = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($setting_pass && !empty($setting_pass['statistics_password'])) {
+        if ($text != $setting_pass['statistics_password']) {
+            sendmessage($from_id, "❌ پسورد اشتباه است. لطفاً دوباره تلاش کنید:", null, 'HTML');
+            return;
+        }
+    }
+    // پسورد درست بود
+    step('home', $from_id);
+    sendmessage($from_id, "✅ پسورد تایید شد.\n\n📊 <b>منوی آمار ربات</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:", $keyboard_stat, 'HTML');
+} elseif ($text == $textbotlang['Admin']['Status']['btn'] || $text == "📊 آمار ربات") {
     // بررسی پسورد آمار
     $stmt = $pdo->prepare("SELECT statistics_password FROM setting LIMIT 1");
     $stmt->execute();
     $setting_pass = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($setting_pass && !empty($setting_pass['statistics_password'])) {
         // اگر پسورد تنظیم شده باشد، باید از کاربر پسورد بگیریم
-        if ($user['step'] != 'verify_statistics_password') {
-            sendmessage($from_id, "🔐 لطفاً پسورد آمار را وارد کنید:", null, 'HTML');
-            step('verify_statistics_password', $from_id);
-            return;
-        }
+        sendmessage($from_id, "🔐 لطفاً پسورد آمار را وارد کنید:", null, 'HTML');
+        step('verify_statistics_password', $from_id);
+        return;
     }
-    // اگر پسورد درست بود یا پسورد تنظیم نشده بود، منوی آمار را نمایش بده
-    if ($user['step'] == 'verify_statistics_password') {
-        if ($text != $setting_pass['statistics_password']) {
-            sendmessage($from_id, "❌ پسورد اشتباه است. لطفاً دوباره تلاش کنید:", null, 'HTML');
-            return;
-        }
-        step('home', $from_id);
-    }
-    // ادامه کد آمار...
+    // اگر پسورد تنظیم نشده بود، مستقیماً منوی آمار را نمایش بده
+    sendmessage($from_id, "📊 <b>منوی آمار ربات</b>\n\nیکی از گزینه‌های زیر را انتخاب کنید:", $keyboard_stat, 'HTML');
 } elseif ($datain == "stat_all_bot") {
     $Balanceall = select("user", "SUM(Balance)", null, null, "select")['SUM(Balance)'];
     $statistics = select("user", "*", null, null, "count");
