@@ -6302,6 +6302,7 @@ if (preg_match('/^sendresidcart-(.*)/', $datain, $dataget)) {
         'inline_keyboard' => [
             [
                 ['text' => $textbotlang['users']['Balance']['Confirmpaying'], 'callback_data' => "Confirm_pay_{$PaymentReport['id_order']}"],
+                ['text' => "🚫 بدون آمار", 'callback_data' => "exclude_stat_{$PaymentReport['id_order']}"],
                 ['text' => $textbotlang['users']['Balance']['reject_pay'], 'callback_data' => "reject_pay_{$PaymentReport['id_order']}"],
             ],
             [
