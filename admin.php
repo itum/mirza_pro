@@ -12169,9 +12169,64 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         'other' => 'متفرقه'
     ];
     $type_name = $type_names[$expense_type] ?? $expense_type;
-    sendmessage($from_id, "💰 مبلغ هزینه $type_name را وارد کنید (به تومان):", null, 'HTML');
-    step("get_expense_amount", $from_id);
-    update("user", "Processing_value", $expense_type, "id", $from_id);
+    
+    // اگر نوع سرور است، ابتدا تاریخ شروع و پایان را بگیر
+    if ($expense_type == 'server') {
+        sendmessage($from_id, "📅 <b>ثبت هزینه سرور</b>\n\nلطفاً تاریخ شروع سرور را وارد کنید (فرمت: 1403/01/01):", null, 'HTML');
+        step("get_expense_server_start_date", $from_id);
+        update("user", "Processing_value", $expense_type, "id", $from_id);
+    } else {
+        sendmessage($from_id, "💰 مبلغ هزینه $type_name را وارد کنید (به تومان):", null, 'HTML');
+        step("get_expense_amount", $from_id);
+        update("user", "Processing_value", $expense_type, "id", $from_id);
+    }
+} elseif ($user['step'] == "get_expense_server_start_date") {
+    require_once __DIR__ . '/jdf.php';
+    // تبدیل تاریخ شمسی به میلادی
+    $jalali_date = trim($text);
+    if (preg_match('/(\d{4})\/(\d{1,2})\/(\d{1,2})/', $jalali_date, $matches)) {
+        $j_year = intval($matches[1]);
+        $j_month = intval($matches[2]);
+        $j_day = intval($matches[3]);
+        
+        $gregorian = jalali_to_gregorian($j_year, $j_month, $j_day);
+        $start_timestamp = mktime(0, 0, 0, $gregorian[1], $gregorian[2], $gregorian[0]);
+        $start_date = date('Y-m-d', $start_timestamp);
+        
+        update("user", "Processing_value_one", $start_date, "id", $from_id);
+        sendmessage($from_id, "📅 تاریخ پایان سرور را وارد کنید (فرمت: 1403/01/01):", null, 'HTML');
+        step("get_expense_server_end_date", $from_id);
+    } else {
+        sendmessage($from_id, "❌ فرمت تاریخ اشتباه است. لطفاً به فرمت 1403/01/01 وارد کنید:", null, 'HTML');
+        return;
+    }
+} elseif ($user['step'] == "get_expense_server_end_date") {
+    require_once __DIR__ . '/jdf.php';
+    // تبدیل تاریخ شمسی به میلادی
+    $jalali_date = trim($text);
+    if (preg_match('/(\d{4})\/(\d{1,2})\/(\d{1,2})/', $jalali_date, $matches)) {
+        $j_year = intval($matches[1]);
+        $j_month = intval($matches[2]);
+        $j_day = intval($matches[3]);
+        
+        $gregorian = jalali_to_gregorian($j_year, $j_month, $j_day);
+        $end_timestamp = mktime(0, 0, 0, $gregorian[1], $gregorian[2], $gregorian[0]);
+        $end_date = date('Y-m-d', $end_timestamp);
+        
+        // بررسی اینکه تاریخ پایان بعد از تاریخ شروع باشد
+        $start_date = $user['Processing_value_one'];
+        if (strtotime($end_date) < strtotime($start_date)) {
+            sendmessage($from_id, "❌ تاریخ پایان باید بعد از تاریخ شروع باشد. لطفاً دوباره وارد کنید:", null, 'HTML');
+            return;
+        }
+        
+        update("user", "Processing_value_tow", $end_date, "id", $from_id);
+        sendmessage($from_id, "💰 مبلغ هزینه سرور را وارد کنید (به تومان):", null, 'HTML');
+        step("get_expense_amount", $from_id);
+    } else {
+        sendmessage($from_id, "❌ فرمت تاریخ اشتباه است. لطفاً به فرمت 1403/01/01 وارد کنید:", null, 'HTML');
+        return;
+    }
 } elseif ($user['step'] == "get_expense_amount") {
     if (!is_numeric($text)) {
         sendmessage($from_id, "❌ لطفاً یک عدد معتبر وارد کنید:", null, 'HTML');
@@ -12239,13 +12294,23 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
         }
     }
     
-    $stmt = $pdo->prepare("INSERT INTO expenses (type, description, amount, month, admin_id, document_path, created_at) VALUES (:type, :description, :amount, :month, :admin_id, :document_path, :created_at)");
+    // اگر نوع سرور است، تاریخ شروع و پایان را هم ذخیره کن
+    $start_date = null;
+    $end_date = null;
+    if ($expense_type == 'server') {
+        $start_date = $user['Processing_value_one'] ?? null;
+        $end_date = $user['Processing_value_tow'] ?? null;
+    }
+    
+    $stmt = $pdo->prepare("INSERT INTO expenses (type, description, amount, month, admin_id, document_path, start_date, end_date, created_at) VALUES (:type, :description, :amount, :month, :admin_id, :document_path, :start_date, :end_date, :created_at)");
     $stmt->bindParam(':type', $expense_type);
     $stmt->bindParam(':description', $description);
     $stmt->bindParam(':amount', $expense_amount);
     $stmt->bindParam(':month', $current_month);
     $stmt->bindParam(':admin_id', $from_id);
     $stmt->bindParam(':document_path', $document_path);
+    $stmt->bindParam(':start_date', $start_date);
+    $stmt->bindParam(':end_date', $end_date);
     $stmt->bindParam(':created_at', $current_time);
     $stmt->execute();
     
@@ -12274,9 +12339,18 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $amount_formatted = number_format(floatval($expense_amount), 0);
     $doc_text = $document_path ? "\n📎 فاکتور با موفقیت آپلود شد." : "";
     
-    sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.$doc_text", $keyboard_stat, 'HTML');
+    $date_text = "";
+    if ($expense_type == 'server' && $start_date && $end_date) {
+        require_once __DIR__ . '/jdf.php';
+        $start_jalali = jdate('Y/m/d', strtotime($start_date));
+        $end_jalali = jdate('Y/m/d', strtotime($end_date));
+        $date_text = "\n📅 <b>دوره:</b> از $start_jalali تا $end_jalali";
+    }
+    
+    sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.$date_text$doc_text", $keyboard_stat, 'HTML');
     step("home", $from_id);
     update("user", "Processing_value", "none", "id", $from_id);
+    update("user", "Processing_value_one", "none", "id", $from_id);
     update("user", "Processing_value_tow", "none", "id", $from_id);
     update("user", "Processing_value_three", "none", "id", $from_id);
 } elseif ($datain == "list_expenses") {
@@ -12372,6 +12446,15 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $text .= "📌 <b>نوع:</b> $type_name\n";
     $text .= "💵 <b>مبلغ:</b> $amount_formatted تومان\n";
     $text .= "📝 <b>توضیحات:</b> $desc\n";
+    if ($expense['type'] == 'server' && !empty($expense['start_date']) && !empty($expense['end_date'])) {
+        $start_jalali = jdate('Y/m/d', strtotime($expense['start_date']));
+        $end_jalali = jdate('Y/m/d', strtotime($expense['end_date']));
+        $days_remaining = intval((strtotime($expense['end_date']) - time()) / 86400);
+        $status_icon = $days_remaining > 7 ? "🟢" : ($days_remaining > 0 ? "🟡" : "🔴");
+        $text .= "📅 <b>تاریخ شروع:</b> $start_jalali\n";
+        $text .= "📅 <b>تاریخ پایان:</b> $end_jalali\n";
+        $text .= "$status_icon <b>روزهای باقی‌مانده:</b> " . ($days_remaining > 0 ? "$days_remaining روز" : "منقضی شده") . "\n";
+    }
     $text .= "$doc_text\n";
     $text .= "📅 <b>تاریخ ثبت:</b> $created_date\n";
     $text .= "🔄 <b>آخرین ویرایش:</b> $updated_date\n";

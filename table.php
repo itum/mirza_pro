@@ -1516,6 +1516,18 @@ try {
         if (mysqli_num_rows($Check_filde) != 1) {
             $result = $connect->query("ALTER TABLE expenses ADD updated_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
         }
+        $Check_filde = $connect->query("SHOW COLUMNS FROM expenses LIKE 'start_date'");
+        if (mysqli_num_rows($Check_filde) != 1) {
+            $result = $connect->query("ALTER TABLE expenses ADD start_date varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        }
+        $Check_filde = $connect->query("SHOW COLUMNS FROM expenses LIKE 'end_date'");
+        if (mysqli_num_rows($Check_filde) != 1) {
+            $result = $connect->query("ALTER TABLE expenses ADD end_date varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        }
+        $Check_filde = $connect->query("SHOW COLUMNS FROM expenses LIKE 'notification_sent'");
+        if (mysqli_num_rows($Check_filde) != 1) {
+            $result = $connect->query("ALTER TABLE expenses ADD notification_sent TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        }
     }
 } catch (Exception $e) {
     file_put_contents('error_log', $e->getMessage());

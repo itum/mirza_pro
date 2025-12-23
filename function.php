@@ -1645,8 +1645,9 @@ function activecron()
         "*/30 * * * * curl https://$domainhosts/cronbot/expireagent.php",
         "*/15 * * * * curl https://$domainhosts/cronbot/on_hold.php",
         "*/2 * * * * curl https://$domainhosts/cronbot/configtest.php",
-        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_node.php",
         "*/15 * * * * curl https://$domainhosts/cronbot/uptime_panel.php",
+        "*/15 * * * * curl https://$domainhosts/cronbot/uptime_node.php",
+        "0 9 * * * curl https://$domainhosts/cronbot/server_renewal_notification.php",
     ];
 
     addCronIfNotExists($cronCommands);
