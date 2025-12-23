@@ -12355,9 +12355,13 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     $date_text = "";
     if ($expense_type == 'server' && $start_date && $end_date) {
         require_once __DIR__ . '/jdf.php';
-        $start_jalali = jdate('Y/m/d', strtotime($start_date));
-        $end_jalali = jdate('Y/m/d', strtotime($end_date));
-        $date_text = "\n📅 <b>دوره:</b> از $start_jalali تا $end_jalali";
+        $start_timestamp = strtotime($start_date);
+        $end_timestamp = strtotime($end_date);
+        if ($start_timestamp !== false && $end_timestamp !== false) {
+            $start_jalali = jdate('Y/m/d', $start_timestamp);
+            $end_jalali = jdate('Y/m/d', $end_timestamp);
+            $date_text = "\n📅 <b>دوره:</b> از $start_jalali تا $end_jalali";
+        }
     }
     
     sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.$date_text$doc_text", $keyboard_stat, 'HTML');
