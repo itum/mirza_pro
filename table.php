@@ -1462,6 +1462,150 @@ try {
     file_put_contents('error_log', $e->getMessage());
 }
 
+//-----------------------------------------------------------------
+// جدول statistics_excluded - برای ذخیره پرداخت‌های بدون آمار
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'statistics_excluded'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE statistics_excluded (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        id_order varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        id_user varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        price varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        admin_id varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        time varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        month varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table statistics_excluded" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// جدول expenses - برای ذخیره هزینه‌ها
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'expenses'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE expenses (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        type varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        amount varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        month varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        admin_id varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table expenses" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// جدول partners - برای ذخیره اطلاعات شرکا
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'partners'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE partners (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        name varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        percentage DECIMAL(5,2) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table partners" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// جدول monthly_settlements - برای ذخیره تسویه‌های ماهیانه
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'monthly_settlements'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE monthly_settlements (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        month varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL UNIQUE,
+        total_revenue varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        total_expenses varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        net_profit varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        settlement_status varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
+        settled_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+        settled_by varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table monthly_settlements" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// جدول partner_shares - برای ذخیره سهم هر شریک در هر ماه
+try {
+    $result = $connect->query("SHOW TABLES LIKE 'partner_shares'");
+    $table_exists = ($result->num_rows > 0);
+    if (!$table_exists) {
+        $result = $connect->query("CREATE TABLE partner_shares (
+        id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        settlement_id INT(6) UNSIGNED NOT NULL,
+        partner_id INT(6) UNSIGNED NOT NULL,
+        share_amount varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        percentage DECIMAL(5,2) NOT NULL,
+        created_at varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+        FOREIGN KEY (settlement_id) REFERENCES monthly_settlements(id) ON DELETE CASCADE,
+        FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE CASCADE
+        )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!$result) {
+            echo "table partner_shares" . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// افزودن فیلد exclude_from_statistics به Payment_report
+try {
+    $Check_filde = $connect->query("SHOW COLUMNS FROM Payment_report LIKE 'exclude_from_statistics'");
+    if (mysqli_num_rows($Check_filde) != 1) {
+        $result = $connect->query("ALTER TABLE Payment_report ADD exclude_from_statistics BOOLEAN DEFAULT FALSE");
+        if (!$result) {
+            echo "Error adding exclude_from_statistics to Payment_report: " . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
+//-----------------------------------------------------------------
+// افزودن فیلد statistics_password به setting
+try {
+    $Check_filde = $connect->query("SHOW COLUMNS FROM setting LIKE 'statistics_password'");
+    if (mysqli_num_rows($Check_filde) != 1) {
+        $result = $connect->query("ALTER TABLE setting ADD statistics_password varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL");
+        if (!$result) {
+            echo "Error adding statistics_password to setting: " . mysqli_error($connect);
+        }
+    }
+} catch (Exception $e) {
+    file_put_contents('error_log', $e->getMessage());
+}
+
 
 
 $balancemain = json_decode(select("PaySetting", "ValuePay", "NamePay", "maxbalance", "select")['ValuePay'], true);

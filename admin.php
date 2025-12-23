@@ -265,7 +265,29 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     update("setting", "limit_usertest_all", $text);
 } elseif ($text == "📯 تنظیمات کانال" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['channel']['description'], $channelkeyboard, 'HTML');
-} elseif ($text == $textbotlang['Admin']['Status']['btn'] || $datain == "stat_all_bot") {
+} elseif ($text == $textbotlang['Admin']['Status']['btn']) {
+    // بررسی پسورد آمار
+    $stmt = $pdo->prepare("SELECT statistics_password FROM setting LIMIT 1");
+    $stmt->execute();
+    $setting_pass = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($setting_pass && !empty($setting_pass['statistics_password'])) {
+        // اگر پسورد تنظیم شده باشد، باید از کاربر پسورد بگیریم
+        if ($user['step'] != 'verify_statistics_password') {
+            sendmessage($from_id, "🔐 لطفاً پسورد آمار را وارد کنید:", null, 'HTML');
+            step('verify_statistics_password', $from_id);
+            return;
+        }
+    }
+    // اگر پسورد درست بود یا پسورد تنظیم نشده بود، منوی آمار را نمایش بده
+    if ($user['step'] == 'verify_statistics_password') {
+        if ($text != $setting_pass['statistics_password']) {
+            sendmessage($from_id, "❌ پسورد اشتباه است. لطفاً دوباره تلاش کنید:", null, 'HTML');
+            return;
+        }
+        step('home', $from_id);
+    }
+    // ادامه کد آمار...
+} elseif ($datain == "stat_all_bot") {
     $Balanceall = select("user", "SUM(Balance)", null, null, "select")['SUM(Balance)'];
     $statistics = select("user", "*", null, null, "count");
     $sumpanel = select("marzban_panel", "*", null, null, "count");
@@ -325,6 +347,14 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     $percent_of_extend = $invoicesum > 0 ? round(($extendsum / $invoicesum) * 100, 2) : 0;
     $percent_of_extend = $percent_of_extend > 100 ? 100 : $percent_of_extend;
     $extendsum = number_format($extendsum, 0);
+    
+    // محاسبه فروش بدون آمار
+    $sql_excluded = "SELECT COUNT(*) as count, SUM(CAST(price AS UNSIGNED)) as sum FROM statistics_excluded";
+    $stmt_excluded = $pdo->prepare($sql_excluded);
+    $stmt_excluded->execute();
+    $excluded_stat = $stmt_excluded->fetch(PDO::FETCH_ASSOC);
+    $excluded_count = intval($excluded_stat['count'] ?? 0);
+    $excluded_sum = number_format(floatval($excluded_stat['sum'] ?? 0), 0);
     if (count($statispay) != 0) {
         foreach ($statispay as $tracepay) {
             $status_var = [
@@ -368,6 +398,10 @@ if (in_array($text, $textadmin) || $datain == "admin") {
 🔹 <b>نمایندگان نوع N:</b> <code>$agentsumn</code> نفر  
 🔸 <b>نمایندگان نوع N2:</b> <code>$agentsumn2</code> نفر  
 🧩 <b>تعداد پنل‌ها:</b> <code>$sumpanel</code> عدد  
+
+🚫 <b>فروش بدون آمار:</b> <code>$excluded_count</code> عدد  
+🚫 <b>جمع فروش بدون آمار:</b> <code>$excluded_sum</code> تومان  
+
 $paycount
 ";
     if ($datain == "stat_all_bot") {
@@ -3485,6 +3519,121 @@ $caption";
     update("user", "Processing_value_one", "none", "id", $Balance_id['id']);
     update("user", "Processing_value_tow", "none", "id", $Balance_id['id']);
     update("user", "Processing_value_four", "none", "id", $Balance_id['id']);
+} elseif (preg_match('/exclude_stat_(\w+)/', $datain, $dataget) && ($adminrulecheck['rule'] == "administrator" || $adminrulecheck['rule'] == "Seller")) {
+    // Handler برای تایید پرداخت بدون آمار - تمام منطق تایید عادی را اجرا می‌کند
+    $order_id = $dataget[1];
+    $Payment_report = select("Payment_report", "*", "id_order", $order_id, "select");
+    $Confirm_pay = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "✅ تایید شده", 'callback_data' => "confirmpaid"],
+            ],
+            [
+                ['text' => "⚙️ مدیریت کاربر", 'callback_data' => "manageuser_" . $Payment_report['id_user']],
+            ]
+        ]
+    ]);
+    if ($Payment_report == false) {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => "تراکنش حذف شده است",
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
+        return;
+    }
+    $sql = "SELECT * FROM Payment_report WHERE id_user = '{$Payment_report['id_user']}' AND payment_Status != 'paid' AND payment_Status != 'Unpaid' AND payment_Status != 'expire' AND payment_Status != 'reject' AND  (id_invoice  LIKE CONCAT('%','getconfigafterpay', '%') OR id_invoice  LIKE CONCAT('%','getextenduser', '%') OR id_invoice  LIKE CONCAT('%','getextravolumeuser', '%') OR id_invoice  LIKE CONCAT('%','getextratimeuser', '%'))";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute();
+    $countpay = $stmt->rowCount();
+    $typepay = explode('|', $Payment_report['id_invoice']);
+    if ($countpay > 0 and !in_array($typepay[0], ['getconfigafterpay', 'getextenduser', 'getextravolumeuser', 'getextratimeuser'])) {
+        sendmessage($from_id, "⚠️ برای تأیید درخواست‌های کاربر، ابتدا رسیدهای خرید یا تمدید اشتراک را بررسی و تأیید کنید. سپس رسید شارژ کیف پول را تأیید کنید. ", null, 'HTML');
+        return;
+    }
+    $format_price_cart = number_format($Payment_report['price']);
+    $Balance_id = select("user", "*", "id", $Payment_report['id_user'], "select");
+    if ($Payment_report['payment_Status'] == "paid" || $Payment_report['payment_Status'] == "reject") {
+        telegram('answerCallbackQuery', array(
+            'callback_query_id' => $callback_query_id,
+            'text' => $textbotlang['Admin']['Payment']['reviewedpayment'],
+            'show_alert' => true,
+            'cache_time' => 5,
+        ));
+        $textconfrom = "✅. پرداخت توسط ادمین دیگری تایید شده
+👤 شناسه کاربر: <code>{$Balance_id['id']}</code>
+🛒 کد پیگیری پرداخت: {$Payment_report['id_order']}
+⚜️ نام کاربری: @{$Balance_id['username']}
+💎 موجودی بعد از تایید : {$Balance_id['Balance']}
+💸 مبلغ پرداختی: $format_price_cart تومان
+";
+        Editmessagetext($from_id, $message_id, $textconfrom, $Confirm_pay);
+        return;
+    }
+    // فراخوانی DirectPayment - تمام منطق کیف پول و تایید پرداخت
+    DirectPayment($order_id);
+    $pricecashback = select("PaySetting", "ValuePay", "NamePay", "chashbackcart", "select")['ValuePay'];
+    $Balance_id = select("user", "*", "id", $Payment_report['id_user'], "select");
+    if ($pricecashback != "0") {
+        $result = ($Payment_report['price'] * $pricecashback) / 100;
+        $Balance_confrim = intval($Balance_id['Balance']) + $result;
+        update("user", "Balance", $Balance_confrim, "id", $Balance_id['id']);
+        $pricecashback = number_format($pricecashback);
+        $text_report = "🎁 کاربر عزیز مبلغ $result تومان به عنوان هدیه واریز به حساب شما واریز گردید.";
+        sendmessage($Balance_id['id'], $text_report, null, 'HTML');
+    }
+    $Payment_report['price'] = number_format($Payment_report['price']);
+    $text_report = "📣 یک ادمین رسید پرداخت  را تایید کرد (بدون آمار).
+        
+اطلاعات :
+💸 روش پرداخت : {$Payment_report['Payment_Method']}
+👤آیدی عددی  ادمین تایید کننده : $from_id
+💰 مبلغ پرداخت : {$Payment_report['price']}
+👤 ایدی عددی کاربر : <code>{$Payment_report['id_user']}</code>
+👤 نام کاربری کاربر : @{$Balance_id['username']} 
+        کد پیگیری پرداحت : $order_id";
+    if (strlen($setting['Channel_Report']) > 0) {
+        telegram('sendmessage', [
+            'chat_id' => $setting['Channel_Report'],
+            'message_thread_id' => $paymentreports,
+            'text' => $text_report,
+            'parse_mode' => "HTML"
+        ]);
+    }
+    update("Payment_report", "payment_Status", "paid", "id_order", $Payment_report['id_order']);
+    update("user", "Processing_value_one", "none", "id", $Balance_id['id']);
+    update("user", "Processing_value_tow", "none", "id", $Balance_id['id']);
+    update("user", "Processing_value_four", "none", "id", $Balance_id['id']);
+    
+    // بعد از تایید موفق، فلگ exclude_from_statistics را true می‌کنیم
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    $current_time = date('Y-m-d H:i:s');
+    
+    // به‌روزرسانی Payment_report
+    $stmt = $pdo->prepare("UPDATE Payment_report SET exclude_from_statistics = TRUE WHERE id_order = :order_id");
+    $stmt->bindParam(':order_id', $order_id);
+    $stmt->execute();
+    
+    // ذخیره در statistics_excluded
+    $stmt = $pdo->prepare("INSERT INTO statistics_excluded (id_order, id_user, price, admin_id, time, month, created_at) VALUES (:id_order, :id_user, :price, :admin_id, :time, :month, :created_at)");
+    $stmt->bindParam(':id_order', $Payment_report['id_order']);
+    $stmt->bindParam(':id_user', $Payment_report['id_user']);
+    $stmt->bindParam(':price', $Payment_report['price']);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':time', $current_time);
+    $stmt->bindParam(':month', $current_month);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $textconfrom = "✅ پرداخت تایید شد (بدون آمار)
+👤 شناسه کاربر: <code>{$Balance_id['id']}</code>
+🛒 کد پیگیری پرداخت: {$Payment_report['id_order']}
+⚜️ نام کاربری: @{$Balance_id['username']}
+💎 موجودی بعد از تایید : {$Balance_id['Balance']}
+💸 مبلغ پرداختی: $format_price_cart تومان
+";
+    Editmessagetext($from_id, $message_id, $textconfrom, $Confirm_pay);
 } elseif (preg_match('/reject_pay_(\w+)/', $datain, $datagetr) && ($adminrulecheck['rule'] == "administrator" || $adminrulecheck['rule'] == "Seller")) {
     $id_order = $datagetr[1];
     $Payment_report = select("Payment_report", "*", "id_order", $id_order, "select");
@@ -9822,6 +9971,7 @@ elseif ($text == "🫣 مخفی کردن پنل برای یک کاربر" && $ad
         ];
         $list_payment['inline_keyboard'][] = [
             ['text' => "✅", 'callback_data' => "Confirm_pay_{$payment['id_order']}"],
+            ['text' => "🚫 بدون آمار", 'callback_data' => "exclude_stat_{$payment['id_order']}"],
             ['text' => "❌", 'callback_data' => "reject_pay_{$payment['id_order']}"],
             ['text' => "📝", 'callback_data' => "showinfopay_{$payment['id_order']}"],
             ['text' => "🗑", 'callback_data' => "removeresid_{$payment['id_order']}"],
@@ -11931,4 +12081,448 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     sendmessage($from_id, $textbotlang['Admin']['SettingnowPayment']['Savaapi'], $Swapinokey, 'HTML');
     update("PaySetting", "ValuePay", $text, "NamePay", "marchent_floypay");
     step('home', $from_id);
+} elseif ($datain == "excluded_statistics") {
+    // نمایش آمار بدون آمار
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    $sql = "SELECT * FROM statistics_excluded ORDER BY time DESC LIMIT 50";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute();
+    $excluded_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $excluded_count = count($excluded_list);
+    $excluded_sum = 0;
+    foreach ($excluded_list as $item) {
+        $excluded_sum += floatval($item['price']);
+    }
+    $excluded_sum = number_format($excluded_sum, 0);
+    $text = "🚫 <b>آمار بدون آمار</b>
+━━━━━━━━━━━━━━━━━━
+📊 <b>تعداد کل:</b> <code>$excluded_count</code> عدد
+💵 <b>جمع کل:</b> <code>$excluded_sum</code> تومان
+
+📅 <b>ماه جاری:</b> $current_month
+";
+    if ($excluded_count > 0) {
+        $text .= "\n📋 <b>آخرین پرداخت‌های بدون آمار:</b>\n";
+        $counter = 1;
+        foreach (array_slice($excluded_list, 0, 10) as $item) {
+            $price_formatted = number_format(floatval($item['price']), 0);
+            $text .= "$counter. کاربر: <code>{$item['id_user']}</code> - مبلغ: $price_formatted تومان\n";
+            $counter++;
+        }
+        if ($excluded_count > 10) {
+            $text .= "\n... و " . ($excluded_count - 10) . " مورد دیگر";
+        }
+    }
+    Editmessagetext($from_id, $message_id, $text, $keyboard_stat, 'HTML');
+} elseif ($datain == "manage_expenses") {
+    // منوی مدیریت هزینه‌ها
+    $expense_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "➕ افزودن هزینه", 'callback_data' => 'add_expense'],
+            ],
+            [
+                ['text' => "📋 لیست هزینه‌ها", 'callback_data' => 'list_expenses'],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'stat_all_bot'],
+            ]
+        ]
+    ]);
+    sendmessage($from_id, "💰 <b>مدیریت هزینه‌ها</b>\n\nاز این بخش می‌توانید هزینه‌های مختلف را ثبت و مدیریت کنید.", $expense_keyboard, 'HTML');
+} elseif ($datain == "add_expense") {
+    // انتخاب نوع هزینه
+    $expense_type_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "🖥️ سرور", 'callback_data' => 'expense_type_server'],
+                ['text' => "📊 ترافیک", 'callback_data' => 'expense_type_traffic'],
+            ],
+            [
+                ['text' => "🌐 نود", 'callback_data' => 'expense_type_node'],
+                ['text' => "🌍 دامنه", 'callback_data' => 'expense_type_domain'],
+            ],
+            [
+                ['text' => "💬 پشتیبانی", 'callback_data' => 'expense_type_support'],
+                ['text' => "📝 متفرقه", 'callback_data' => 'expense_type_other'],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_expenses'],
+            ]
+        ]
+    ]);
+    sendmessage($from_id, "💰 نوع هزینه را انتخاب کنید:", $expense_type_keyboard, 'HTML');
+} elseif (preg_match('/expense_type_(.+)/', $datain, $matches)) {
+    $expense_type = $matches[1];
+    $type_names = [
+        'server' => 'سرور',
+        'traffic' => 'ترافیک',
+        'node' => 'نود',
+        'domain' => 'دامنه',
+        'support' => 'پشتیبانی',
+        'other' => 'متفرقه'
+    ];
+    $type_name = $type_names[$expense_type] ?? $expense_type;
+    sendmessage($from_id, "💰 مبلغ هزینه $type_name را وارد کنید (به تومان):", null, 'HTML');
+    step("get_expense_amount", $from_id);
+    update("user", "Processing_value", $expense_type, "id", $from_id);
+} elseif ($user['step'] == "get_expense_amount") {
+    if (!is_numeric($text)) {
+        sendmessage($from_id, "❌ لطفاً یک عدد معتبر وارد کنید:", null, 'HTML');
+        return;
+    }
+    $expense_type = $user['Processing_value'];
+    sendmessage($from_id, "📝 یادداشت اختیاری را وارد کنید (یا /skip برای رد کردن):", null, 'HTML');
+    step("get_expense_description", $from_id);
+    update("user", "Processing_value_tow", $text, "id", $from_id);
+} elseif ($user['step'] == "get_expense_description") {
+    require_once __DIR__ . '/jdf.php';
+    $expense_type = $user['Processing_value'];
+    $expense_amount = $user['Processing_value_tow'];
+    $description = ($text == "/skip" || $text == "/رد") ? "" : $text;
+    $current_month = getJalaliMonth();
+    $current_time = date('Y-m-d H:i:s');
+    
+    $stmt = $pdo->prepare("INSERT INTO expenses (type, description, amount, month, admin_id, created_at) VALUES (:type, :description, :amount, :month, :admin_id, :created_at)");
+    $stmt->bindParam(':type', $expense_type);
+    $stmt->bindParam(':description', $description);
+    $stmt->bindParam(':amount', $expense_amount);
+    $stmt->bindParam(':month', $current_month);
+    $stmt->bindParam(':admin_id', $from_id);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    $type_names = [
+        'server' => 'سرور',
+        'traffic' => 'ترافیک',
+        'node' => 'نود',
+        'domain' => 'دامنه',
+        'support' => 'پشتیبانی',
+        'other' => 'متفرقه'
+    ];
+    $type_name = $type_names[$expense_type] ?? $expense_type;
+    $amount_formatted = number_format(floatval($expense_amount), 0);
+    
+    sendmessage($from_id, "✅ هزینه $type_name به مبلغ $amount_formatted تومان با موفقیت ثبت شد.", $keyboard_stat, 'HTML');
+    step("home", $from_id);
+    update("user", "Processing_value", "none", "id", $from_id);
+    update("user", "Processing_value_tow", "none", "id", $from_id);
+} elseif ($datain == "list_expenses") {
+    // لیست هزینه‌ها
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    $sql = "SELECT * FROM expenses WHERE month = :month ORDER BY created_at DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':month', $current_month);
+    $stmt->execute();
+    $expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $type_names = [
+        'server' => '🖥️ سرور',
+        'traffic' => '📊 ترافیک',
+        'node' => '🌐 نود',
+        'domain' => '🌍 دامنه',
+        'support' => '💬 پشتیبانی',
+        'other' => '📝 متفرقه'
+    ];
+    
+    $total = 0;
+    $text = "💰 <b>لیست هزینه‌های ماه $current_month</b>\n━━━━━━━━━━━━━━━━━━\n";
+    if (count($expenses) == 0) {
+        $text .= "❌ هیچ هزینه‌ای ثبت نشده است.";
+    } else {
+        foreach ($expenses as $expense) {
+            $type_name = $type_names[$expense['type']] ?? $expense['type'];
+            $amount = number_format(floatval($expense['amount']), 0);
+            $total += floatval($expense['amount']);
+            $desc = !empty($expense['description']) ? "\n   📝 " . $expense['description'] : "";
+            $text .= "$type_name: $amount تومان$desc\n";
+        }
+        $text .= "\n━━━━━━━━━━━━━━━━━━\n";
+        $text .= "💵 <b>جمع کل:</b> " . number_format($total, 0) . " تومان";
+    }
+    
+    $expense_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_expenses'],
+            ]
+        ]
+    ]);
+    Editmessagetext($from_id, $message_id, $text, $expense_keyboard, 'HTML');
+} elseif ($datain == "manage_partners") {
+    // منوی مدیریت شراکت
+    $partner_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "➕ افزودن شریک", 'callback_data' => 'add_partner'],
+            ],
+            [
+                ['text' => "📋 لیست شرکا", 'callback_data' => 'list_partners'],
+            ],
+            [
+                ['text' => "📊 محاسبه سهم", 'callback_data' => 'calculate_shares'],
+            ],
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'stat_all_bot'],
+            ]
+        ]
+    ]);
+    sendmessage($from_id, "👥 <b>مدیریت شراکت</b>\n\nاز این بخش می‌توانید شرکا و درصد شراکت را مدیریت کنید.", $partner_keyboard, 'HTML');
+} elseif ($datain == "add_partner") {
+    sendmessage($from_id, "👤 نام شریک را وارد کنید:", null, 'HTML');
+    step("get_partner_name", $from_id);
+} elseif ($user['step'] == "get_partner_name") {
+    sendmessage($from_id, "📊 درصد شراکت را وارد کنید (مثلاً 35 برای 35%):", null, 'HTML');
+    step("get_partner_percentage", $from_id);
+    update("user", "Processing_value", $text, "id", $from_id);
+} elseif ($user['step'] == "get_partner_percentage") {
+    if (!is_numeric($text) || floatval($text) < 0 || floatval($text) > 100) {
+        sendmessage($from_id, "❌ لطفاً یک عدد معتبر بین 0 تا 100 وارد کنید:", null, 'HTML');
+        return;
+    }
+    $partner_name = $user['Processing_value'];
+    $percentage = floatval($text);
+    
+    // بررسی اینکه مجموع درصدها از 100 تجاوز نکند
+    $stmt = $pdo->prepare("SELECT SUM(percentage) as total FROM partners WHERE is_active = TRUE");
+    $stmt->execute();
+    $total_percentage = floatval($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    if (($total_percentage + $percentage) > 100) {
+        sendmessage($from_id, "❌ مجموع درصد شراکت نمی‌تواند از 100% بیشتر باشد. درصد فعلی: $total_percentage%", null, 'HTML');
+        step("home", $from_id);
+        return;
+    }
+    
+    $current_time = date('Y-m-d H:i:s');
+    $stmt = $pdo->prepare("INSERT INTO partners (name, percentage, is_active, created_at) VALUES (:name, :percentage, TRUE, :created_at)");
+    $stmt->bindParam(':name', $partner_name);
+    $stmt->bindParam(':percentage', $percentage);
+    $stmt->bindParam(':created_at', $current_time);
+    $stmt->execute();
+    
+    sendmessage($from_id, "✅ شریک $partner_name با $percentage% شراکت با موفقیت اضافه شد.", $keyboard_stat, 'HTML');
+    step("home", $from_id);
+    update("user", "Processing_value", "none", "id", $from_id);
+} elseif ($datain == "list_partners") {
+    $stmt = $pdo->prepare("SELECT * FROM partners WHERE is_active = TRUE ORDER BY percentage DESC");
+    $stmt->execute();
+    $partners = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $text = "👥 <b>لیست شرکا</b>\n━━━━━━━━━━━━━━━━━━\n";
+    $total_percentage = 0;
+    if (count($partners) == 0) {
+        $text .= "❌ هیچ شریکی ثبت نشده است.";
+    } else {
+        foreach ($partners as $partner) {
+            $total_percentage += floatval($partner['percentage']);
+            $text .= "👤 {$partner['name']}: {$partner['percentage']}%\n";
+        }
+        $text .= "\n━━━━━━━━━━━━━━━━━━\n";
+        $text .= "📊 <b>مجموع:</b> $total_percentage%";
+    }
+    
+    $partner_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_partners'],
+            ]
+        ]
+    ]);
+    Editmessagetext($from_id, $message_id, $text, $partner_keyboard, 'HTML');
+} elseif ($datain == "calculate_shares") {
+    // محاسبه سهم شرکا
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    $shares = calculatePartnerShares($current_month);
+    
+    $text = "📊 <b>محاسبه سهم شرکا - ماه $current_month</b>\n━━━━━━━━━━━━━━━━━━\n";
+    $text .= "💰 <b>سود خالص:</b> " . number_format($shares['net_profit'], 0) . " تومان\n\n";
+    
+    if (count($shares['shares']) == 0) {
+        $text .= "❌ هیچ شریکی ثبت نشده است.";
+    } else {
+        foreach ($shares['shares'] as $share) {
+            $share_amount = number_format($share['share_amount'], 0);
+            $text .= "👤 <b>{$share['partner_name']}</b> ({$share['percentage']}%): $share_amount تومان\n";
+        }
+    }
+    
+    $share_keyboard = json_encode([
+        'inline_keyboard' => [
+            [
+                ['text' => "⬅️ بازگشت", 'callback_data' => 'manage_partners'],
+            ]
+        ]
+    ]);
+    Editmessagetext($from_id, $message_id, $text, $share_keyboard, 'HTML');
+} elseif ($datain == "set_statistics_password") {
+    if ($adminrulecheck['rule'] != "administrator") {
+        sendmessage($from_id, "❌ فقط ادمین اصلی می‌تواند پسورد را تنظیم کند.", null, 'HTML');
+        return;
+    }
+    sendmessage($from_id, "🔐 پسورد جدید برای آمار را وارد کنید (حداقل 6 کاراکتر):", null, 'HTML');
+    step("set_stat_password", $from_id);
+} elseif ($user['step'] == "set_stat_password") {
+    if (strlen($text) < 6) {
+        sendmessage($from_id, "❌ پسورد باید حداقل 6 کاراکتر باشد. لطفاً دوباره وارد کنید:", null, 'HTML');
+        return;
+    }
+    $stmt = $pdo->prepare("UPDATE setting SET statistics_password = :password");
+    $stmt->bindParam(':password', $text);
+    $stmt->execute();
+    sendmessage($from_id, "✅ پسورد آمار با موفقیت تنظیم شد.", $keyboard_stat, 'HTML');
+    step("home", $from_id);
+} elseif ($datain == "export_excel") {
+    // خروجی اکسل
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    
+    $result = generateExcelReport($current_month);
+    if ($result['success']) {
+        // ارسال فایل به کاربر
+        $file_path = $result['filepath'];
+        $file_name = $result['filename'];
+        
+        if (file_exists($file_path)) {
+            $file_content = file_get_contents($file_path);
+            $file_size = filesize($file_path);
+            
+            // اگر فایل خیلی بزرگ است، لینک دانلود بده
+            if ($file_size > 50 * 1024 * 1024) { // بیشتر از 50 مگابایت
+                sendmessage($from_id, "📥 فایل اکسل آماده است اما به دلیل حجم بالا، لطفاً از طریق سرور دانلود کنید.\n\nمسیر: $file_path", null, 'HTML');
+            } else {
+                // ارسال فایل از طریق تلگرام
+                sendDocument($from_id, $file_path, "📥 گزارش اکسل ماه $current_month");
+            }
+        } else {
+            sendmessage($from_id, "❌ خطا در ایجاد فایل اکسل.", null, 'HTML');
+        }
+    } else {
+        sendmessage($from_id, "❌ خطا در ایجاد فایل اکسل.", null, 'HTML');
+    }
+} elseif ($datain == "monthly_settlement") {
+    // منوی تسویه ماهیانه
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    
+    // بررسی اینکه آیا تسویه قبلاً انجام شده است
+    $stmt = $pdo->prepare("SELECT * FROM monthly_settlements WHERE month = :month");
+    $stmt->bindParam(':month', $current_month);
+    $stmt->execute();
+    $settlement = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($settlement && $settlement['settlement_status'] == 'settled') {
+        $settled_at = jdate('Y/m/d H:i:s', strtotime($settlement['settled_at']));
+        $text = "✅ <b>تسویه ماه $current_month</b>\n━━━━━━━━━━━━━━━━━━\n";
+        $text .= "📅 <b>تاریخ تسویه:</b> $settled_at\n";
+        $text .= "💰 <b>درآمد کل:</b> " . number_format(floatval($settlement['total_revenue']), 0) . " تومان\n";
+        $text .= "💸 <b>هزینه کل:</b> " . number_format(floatval($settlement['total_expenses']), 0) . " تومان\n";
+        $text .= "💵 <b>سود خالص:</b> " . number_format(floatval($settlement['net_profit']), 0) . " تومان\n";
+        
+        // نمایش سهم شرکا
+        $stmt = $pdo->prepare("SELECT ps.*, p.name FROM partner_shares ps JOIN partners p ON ps.partner_id = p.id WHERE ps.settlement_id = :settlement_id");
+        $stmt->bindParam(':settlement_id', $settlement['id']);
+        $stmt->execute();
+        $partner_shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (count($partner_shares) > 0) {
+            $text .= "\n👥 <b>سهم شرکا:</b>\n";
+            foreach ($partner_shares as $share) {
+                $text .= "  • {$share['name']} ({$share['percentage']}%): " . number_format(floatval($share['share_amount']), 0) . " تومان\n";
+            }
+        }
+        
+        $settlement_keyboard = json_encode([
+            'inline_keyboard' => [
+                [
+                    ['text' => "⬅️ بازگشت", 'callback_data' => 'stat_all_bot'],
+                ]
+            ]
+        ]);
+        Editmessagetext($from_id, $message_id, $text, $settlement_keyboard, 'HTML');
+    } else {
+        // محاسبه آمار و نمایش برای تسویه
+        $statistics = calculateMonthlyStatistics($current_month);
+        $shares = calculatePartnerShares($current_month);
+        
+        $text = "✅ <b>تسویه ماهیانه - ماه $current_month</b>\n━━━━━━━━━━━━━━━━━━\n";
+        $text .= "💰 <b>درآمد کل:</b> " . number_format($statistics['total_revenue'], 0) . " تومان\n";
+        $text .= "💸 <b>هزینه کل:</b> " . number_format($statistics['total_expenses'], 0) . " تومان\n";
+        $text .= "💵 <b>سود خالص:</b> " . number_format($statistics['net_profit'], 0) . " تومان\n";
+        
+        if (count($shares['shares']) > 0) {
+            $text .= "\n👥 <b>سهم شرکا:</b>\n";
+            foreach ($shares['shares'] as $share) {
+                $text .= "  • {$share['partner_name']} ({$share['percentage']}%): " . number_format($share['share_amount'], 0) . " تومان\n";
+            }
+        }
+        
+        $settlement_keyboard = json_encode([
+            'inline_keyboard' => [
+                [
+                    ['text' => "✅ ثبت تسویه", 'callback_data' => 'confirm_settlement'],
+                ],
+                [
+                    ['text' => "⬅️ بازگشت", 'callback_data' => 'stat_all_bot'],
+                ]
+            ]
+        ]);
+        Editmessagetext($from_id, $message_id, $text, $settlement_keyboard, 'HTML');
+    }
+} elseif ($datain == "confirm_settlement") {
+    // ثبت تسویه ماهیانه
+    require_once __DIR__ . '/jdf.php';
+    $current_month = getJalaliMonth();
+    
+    // بررسی اینکه آیا قبلاً تسویه شده است
+    $stmt = $pdo->prepare("SELECT * FROM monthly_settlements WHERE month = :month AND settlement_status = 'settled'");
+    $stmt->bindParam(':month', $current_month);
+    $stmt->execute();
+    if ($stmt->rowCount() > 0) {
+        sendmessage($from_id, "❌ تسویه این ماه قبلاً انجام شده است.", null, 'HTML');
+        return;
+    }
+    
+    $statistics = calculateMonthlyStatistics($current_month);
+    $shares = calculatePartnerShares($current_month);
+    $current_time = date('Y-m-d H:i:s');
+    
+    // ثبت تسویه
+    $stmt = $pdo->prepare("INSERT INTO monthly_settlements (month, total_revenue, total_expenses, net_profit, settlement_status, settled_at, settled_by) VALUES (:month, :total_revenue, :total_expenses, :net_profit, 'settled', :settled_at, :settled_by) ON DUPLICATE KEY UPDATE total_revenue = :total_revenue, total_expenses = :total_expenses, net_profit = :net_profit, settlement_status = 'settled', settled_at = :settled_at, settled_by = :settled_by");
+    $total_revenue = strval($statistics['total_revenue']);
+    $total_expenses = strval($statistics['total_expenses']);
+    $net_profit = strval($statistics['net_profit']);
+    $stmt->bindParam(':month', $current_month);
+    $stmt->bindParam(':total_revenue', $total_revenue);
+    $stmt->bindParam(':total_expenses', $total_expenses);
+    $stmt->bindParam(':net_profit', $net_profit);
+    $stmt->bindParam(':settled_at', $current_time);
+    $stmt->bindParam(':settled_by', $from_id);
+    $stmt->execute();
+    
+    $settlement_id = $pdo->lastInsertId();
+    if ($settlement_id == 0) {
+        // اگر insert نشد، یعنی duplicate key بود، باید id را بگیریم
+        $stmt = $pdo->prepare("SELECT id FROM monthly_settlements WHERE month = :month");
+        $stmt->bindParam(':month', $current_month);
+        $stmt->execute();
+        $settlement_id = $stmt->fetch(PDO::FETCH_ASSOC)['id'];
+    }
+    
+    // ثبت سهم شرکا
+    foreach ($shares['shares'] as $share) {
+        $stmt = $pdo->prepare("INSERT INTO partner_shares (settlement_id, partner_id, share_amount, percentage, created_at) VALUES (:settlement_id, :partner_id, :share_amount, :percentage, :created_at)");
+        $share_amount = strval($share['share_amount']);
+        $percentage = strval($share['percentage']);
+        $stmt->bindParam(':settlement_id', $settlement_id);
+        $stmt->bindParam(':partner_id', $share['partner_id']);
+        $stmt->bindParam(':share_amount', $share_amount);
+        $stmt->bindParam(':percentage', $percentage);
+        $stmt->bindParam(':created_at', $current_time);
+        $stmt->execute();
+    }
+    
+    sendmessage($from_id, "✅ تسویه ماه $current_month با موفقیت ثبت شد.", $keyboard_stat, 'HTML');
 }

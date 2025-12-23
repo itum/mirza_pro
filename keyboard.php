@@ -1674,6 +1674,20 @@ $keyboard_stat = json_encode([
                 ],
                 [
                     ['text' => "🗓 مشاهده آمار در تاریخ مشخص", 'callback_data' => 'view_stat_time'],
+                ],
+                [
+                    ['text' => "🚫 آمار بدون آمار", 'callback_data' => 'excluded_statistics'],
+                ],
+                [
+                    ['text' => "💰 مدیریت هزینه‌ها", 'callback_data' => 'manage_expenses'],
+                    ['text' => "👥 مدیریت شراکت", 'callback_data' => 'manage_partners'],
+                ],
+                [
+                    ['text' => "📥 خروجی اکسل", 'callback_data' => 'export_excel'],
+                    ['text' => "✅ تسویه ماهیانه", 'callback_data' => 'monthly_settlement'],
+                ],
+                [
+                    ['text' => "🔐 تنظیم پسورد آمار", 'callback_data' => 'set_statistics_password'],
                 ]
             ]
         ]);

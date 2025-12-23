@@ -2084,3 +2084,306 @@ function createPayaqayepardakht($price, $order_id)
     curl_close($curl);
     return json_decode($response, true);
 }
+
+//-----------------------------------------------------------------
+// توابع مربوط به آمار و شراکت
+//-----------------------------------------------------------------
+
+/**
+ * تبدیل تاریخ میلادی به ماه شمسی (فرمت YYYY-MM)
+ */
+function getJalaliMonth($timestamp = null) {
+    require_once __DIR__ . '/jdf.php';
+    if ($timestamp === null) {
+        $timestamp = time();
+    }
+    $jdate = jdate('Y-m', $timestamp);
+    return $jdate;
+}
+
+/**
+ * محاسبه بازه زمانی شمسی
+ */
+function getJalaliDateRange($start_date, $end_date) {
+    require_once __DIR__ . '/jdf.php';
+    $start_jalali = jdate('Y-m-d', $start_date);
+    $end_jalali = jdate('Y-m-d', $end_date);
+    return [
+        'start' => $start_jalali,
+        'end' => $end_jalali,
+        'start_timestamp' => $start_date,
+        'end_timestamp' => $end_date
+    ];
+}
+
+/**
+ * بررسی پسورد آمار
+ */
+function verifyStatisticsPassword($password) {
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT statistics_password FROM setting LIMIT 1");
+    $stmt->execute();
+    $setting = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$setting || empty($setting['statistics_password'])) {
+        return true; // اگر پسورد تنظیم نشده باشد، اجازه دسترسی بده
+    }
+    return $setting['statistics_password'] === $password;
+}
+
+/**
+ * محاسبه آمار ماهیانه بر اساس تاریخ شمسی
+ */
+function calculateMonthlyStatistics($month = null) {
+    global $pdo;
+    require_once __DIR__ . '/jdf.php';
+    
+    if ($month === null) {
+        $month = getJalaliMonth();
+    }
+    
+    // تبدیل ماه شمسی به بازه زمانی میلادی
+    list($j_year, $j_month) = explode('-', $month);
+    $j_year = intval($j_year);
+    $j_month = intval($j_month);
+    $start_date = jalali_to_gregorian($j_year, $j_month, 1);
+    $days_in_month = jdate('t', mktime(0, 0, 0, $j_month, 1, $j_year));
+    $end_date = jalali_to_gregorian($j_year, $j_month, intval($days_in_month));
+    $start_timestamp = mktime(0, 0, 0, $start_date[1], $start_date[2], $start_date[0]);
+    $end_timestamp = mktime(23, 59, 59, $end_date[1], $end_date[2], $end_date[0]);
+    
+    // محاسبه درآمد کل (بدون پرداخت‌های بدون آمار)
+    $sql = "SELECT SUM(CAST(price AS UNSIGNED)) as total_revenue, COUNT(*) as count 
+            FROM Payment_report 
+            WHERE payment_Status = 'paid' 
+            AND (exclude_from_statistics = FALSE OR exclude_from_statistics IS NULL)
+            AND time BETWEEN :start_date AND :end_date";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':start_date', date('Y-m-d H:i:s', $start_timestamp));
+    $stmt->bindParam(':end_date', date('Y-m-d H:i:s', $end_timestamp));
+    $stmt->execute();
+    $revenue = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    // محاسبه هزینه کل
+    $sql = "SELECT SUM(CAST(amount AS UNSIGNED)) as total_expenses, COUNT(*) as count 
+            FROM expenses 
+            WHERE month = :month";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':month', $month);
+    $stmt->execute();
+    $expenses = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    $total_revenue = floatval($revenue['total_revenue'] ?? 0);
+    $total_expenses = floatval($expenses['total_expenses'] ?? 0);
+    $net_profit = $total_revenue - $total_expenses;
+    
+    return [
+        'month' => $month,
+        'total_revenue' => $total_revenue,
+        'total_expenses' => $total_expenses,
+        'net_profit' => $net_profit,
+        'revenue_count' => intval($revenue['count'] ?? 0),
+        'expenses_count' => intval($expenses['count'] ?? 0)
+    ];
+}
+
+/**
+ * محاسبه سهم شرکا
+ */
+function calculatePartnerShares($month = null) {
+    global $pdo;
+    
+    if ($month === null) {
+        $month = getJalaliMonth();
+    }
+    
+    $statistics = calculateMonthlyStatistics($month);
+    $net_profit = $statistics['net_profit'];
+    
+    // دریافت لیست شرکای فعال
+    $stmt = $pdo->prepare("SELECT * FROM partners WHERE is_active = TRUE");
+    $stmt->execute();
+    $partners = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $shares = [];
+    foreach ($partners as $partner) {
+        $share_amount = ($net_profit * floatval($partner['percentage'])) / 100;
+        $shares[] = [
+            'partner_id' => $partner['id'],
+            'partner_name' => $partner['name'],
+            'percentage' => floatval($partner['percentage']),
+            'share_amount' => $share_amount
+        ];
+    }
+    
+    return [
+        'month' => $month,
+        'net_profit' => $net_profit,
+        'shares' => $shares
+    ];
+}
+
+/**
+ * ایجاد فایل اکسل با 5 شیت
+ */
+function generateExcelReport($month = null) {
+    global $pdo;
+    require_once __DIR__ . '/vendor/autoload.php';
+    require_once __DIR__ . '/jdf.php';
+    
+    if ($month === null) {
+        $month = getJalaliMonth();
+    }
+    
+    // ایجاد فایل اکسل
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    
+    // شیت A - خلاصه
+    $sheetA = $spreadsheet->getActiveSheet();
+    $sheetA->setTitle('خلاصه');
+    $statistics = calculateMonthlyStatistics($month);
+    $shares = calculatePartnerShares($month);
+    
+    $sheetA->setCellValue('A1', 'خلاصه آمار - ماه ' . $month);
+    $sheetA->setCellValue('A2', 'درآمد کل');
+    $sheetA->setCellValue('B2', number_format($statistics['total_revenue'], 0));
+    $sheetA->setCellValue('A3', 'هزینه کل');
+    $sheetA->setCellValue('B3', number_format($statistics['total_expenses'], 0));
+    $sheetA->setCellValue('A4', 'سود خالص');
+    $sheetA->setCellValue('B4', number_format($statistics['net_profit'], 0));
+    $sheetA->setCellValue('A5', 'تعداد فروش');
+    $sheetA->setCellValue('B5', $statistics['revenue_count']);
+    $sheetA->setCellValue('A6', 'تعداد هزینه');
+    $sheetA->setCellValue('B6', $statistics['expenses_count']);
+    
+    $row = 8;
+    $sheetA->setCellValue('A' . $row, 'سهم شرکا');
+    $row++;
+    foreach ($shares['shares'] as $share) {
+        $sheetA->setCellValue('A' . $row, $share['partner_name'] . ' (' . $share['percentage'] . '%)');
+        $sheetA->setCellValue('B' . $row, number_format($share['share_amount'], 0));
+        $row++;
+    }
+    
+    // شیت B - جزئیات فروش
+    $sheetB = $spreadsheet->createSheet();
+    $sheetB->setTitle('جزئیات فروش');
+    list($j_year, $j_month) = explode('-', $month);
+    $start_date = jalali_to_gregorian($j_year, $j_month, 1);
+    $end_date = jalali_to_gregorian($j_year, $j_month, jdate('t', mktime(0, 0, 0, $j_month, 1, $j_year)));
+    $start_timestamp = mktime(0, 0, 0, $start_date[1], $start_date[2], $start_date[0]);
+    $end_timestamp = mktime(23, 59, 59, $end_date[1], $end_date[2], $end_date[0]);
+    
+    $sql = "SELECT * FROM Payment_report WHERE payment_Status = 'paid' AND (exclude_from_statistics = FALSE OR exclude_from_statistics IS NULL) AND time BETWEEN :start_date AND :end_date ORDER BY time DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':start_date', date('Y-m-d H:i:s', $start_timestamp));
+    $stmt->bindParam(':end_date', date('Y-m-d H:i:s', $end_timestamp));
+    $stmt->execute();
+    $sales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $sheetB->setCellValue('A1', 'تاریخ');
+    $sheetB->setCellValue('B1', 'کاربر');
+    $sheetB->setCellValue('C1', 'مبلغ');
+    $sheetB->setCellValue('D1', 'روش پرداخت');
+    $sheetB->setCellValue('E1', 'وضعیت');
+    
+    $row = 2;
+    foreach ($sales as $sale) {
+        $jdate = jdate('Y/m/d H:i:s', strtotime($sale['time']));
+        $sheetB->setCellValue('A' . $row, $jdate);
+        $sheetB->setCellValue('B' . $row, $sale['id_user']);
+        $sheetB->setCellValue('C' . $row, number_format(floatval($sale['price']), 0));
+        $sheetB->setCellValue('D' . $row, $sale['Payment_Method']);
+        $sheetB->setCellValue('E' . $row, $sale['payment_Status']);
+        $row++;
+    }
+    
+    // شیت C - فروش بدون آمار
+    $sheetC = $spreadsheet->createSheet();
+    $sheetC->setTitle('فروش بدون آمار');
+    $sql = "SELECT * FROM statistics_excluded WHERE month = :month ORDER BY time DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':month', $month);
+    $stmt->execute();
+    $excluded = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $sheetC->setCellValue('A1', 'تاریخ');
+    $sheetC->setCellValue('B1', 'کاربر');
+    $sheetC->setCellValue('C1', 'مبلغ');
+    $sheetC->setCellValue('D1', 'ادمین تایید کننده');
+    
+    $row = 2;
+    foreach ($excluded as $item) {
+        $jdate = jdate('Y/m/d H:i:s', strtotime($item['time']));
+        $sheetC->setCellValue('A' . $row, $jdate);
+        $sheetC->setCellValue('B' . $row, $item['id_user']);
+        $sheetC->setCellValue('C' . $row, number_format(floatval($item['price']), 0));
+        $sheetC->setCellValue('D' . $row, $item['admin_id']);
+        $row++;
+    }
+    
+    // شیت D - هزینه‌ها
+    $sheetD = $spreadsheet->createSheet();
+    $sheetD->setTitle('هزینه‌ها');
+    $sql = "SELECT * FROM expenses WHERE month = :month ORDER BY created_at DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindParam(':month', $month);
+    $stmt->execute();
+    $expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    $type_names = [
+        'server' => 'سرور',
+        'traffic' => 'ترافیک',
+        'node' => 'نود',
+        'domain' => 'دامنه',
+        'support' => 'پشتیبانی',
+        'other' => 'متفرقه'
+    ];
+    
+    $sheetD->setCellValue('A1', 'نوع');
+    $sheetD->setCellValue('B1', 'مبلغ');
+    $sheetD->setCellValue('C1', 'توضیحات');
+    $sheetD->setCellValue('D1', 'تاریخ');
+    
+    $row = 2;
+    foreach ($expenses as $expense) {
+        $type_name = $type_names[$expense['type']] ?? $expense['type'];
+        $jdate = jdate('Y/m/d H:i:s', strtotime($expense['created_at']));
+        $sheetD->setCellValue('A' . $row, $type_name);
+        $sheetD->setCellValue('B' . $row, number_format(floatval($expense['amount']), 0));
+        $sheetD->setCellValue('C' . $row, $expense['description'] ?? '');
+        $sheetD->setCellValue('D' . $row, $jdate);
+        $row++;
+    }
+    
+    // شیت E - سهم شرکا
+    $sheetE = $spreadsheet->createSheet();
+    $sheetE->setTitle('سهم شرکا');
+    $sheetE->setCellValue('A1', 'شریک');
+    $sheetE->setCellValue('B1', 'درصد');
+    $sheetE->setCellValue('C1', 'مبلغ سهم');
+    
+    $row = 2;
+    foreach ($shares['shares'] as $share) {
+        $sheetE->setCellValue('A' . $row, $share['partner_name']);
+        $sheetE->setCellValue('B' . $row, $share['percentage'] . '%');
+        $sheetE->setCellValue('C' . $row, number_format($share['share_amount'], 0));
+        $row++;
+    }
+    
+    // ذخیره فایل
+    $excel_dir = __DIR__ . '/exports';
+    if (!is_dir($excel_dir)) {
+        mkdir($excel_dir, 0755, true);
+    }
+    $filename = 'report_' . $month . '_' . time() . '.xlsx';
+    $filepath = $excel_dir . '/' . $filename;
+    
+    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+    $writer->save($filepath);
+    
+    return [
+        'success' => true,
+        'filepath' => $filepath,
+        'filename' => $filename
+    ];
+}
