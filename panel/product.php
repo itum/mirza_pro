@@ -30,6 +30,10 @@ try {
     $query = $pdo->prepare("SELECT * FROM marzban_panel");
     $query->execute();
     $listpanel = $query->fetchAll();
+    
+    $query = $pdo->prepare("SELECT * FROM category ORDER BY remark ASC");
+    $query->execute();
+    $listcategory = $query->fetchAll();
 } catch (PDOException $e) {
     error_log("Database error in product.php (initial queries): " . $e->getMessage());
     die("خطا در اتصال به پایگاه داده");
@@ -314,7 +318,18 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
                                                     </div>
                                                     <div class="form-group">
                                                         <label for="cetegory_product" class="col-lg-2 control-label">دسته بندی محصول</label>
-                                                        <div class="col-lg-10"><input required type="text" name = "cetegory_product" class="form-control" id="cetegory_product"></div>
+                                                        <div class="col-lg-10">
+                                                        <select name = "cetegory_product" class="form-control" id="cetegory_product">
+                                                            <option value="">بدون دسته بندی</option>
+                                                            <?php
+                                                            if(count($listcategory) > 0){
+                                                                foreach($listcategory as $cat){
+                                                                    echo "<option value=\"{$cat['remark']}\">{$cat['remark']}</option>";
+                                                                }
+                                                            }
+                                                            ?>
+                                                        </select>
+                                                    </div>
                                                     </div>
 
                                                     <div class="form-group">

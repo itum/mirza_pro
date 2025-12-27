@@ -14,18 +14,22 @@ $statusmessage = false;
 $infomesssage = "";
 $id_product = htmlspecialchars($_GET['id'], ENT_QUOTES, 'UTF-8');
 $product = select("product","*","id",$id_product,"select");
+$query = $pdo->prepare("SELECT * FROM category ORDER BY remark ASC");
+$query->execute();
+$listcategory = $query->fetchAll();
 if($product == false){
     $statusmessage = true;
     $infomesssage ="محصول پیدا نشد";
 }else{
 if($_GET['action'] == "save"){
     $name_product = htmlspecialchars($_POST['name_product'], ENT_QUOTES, 'UTF-8');
-    $prodcutcheck = select("product","*","name_product",$name_product,"count");
-    if($prodcutcheck != 0){
-        $statusmessage = true;
-        $infomesssage ="نام محصول وجود دارد.";
-    }else{
-        if($product['name_product'] != $name_product){
+    // Only check for duplicate name if the name has changed
+    if($product['name_product'] != $name_product){
+        $prodcutcheck = select("product","*","name_product",$name_product,"count");
+        if($prodcutcheck != 0){
+            $statusmessage = true;
+            $infomesssage ="نام محصول وجود دارد.";
+        }else{
             update("product","name_product",$name_product,"id",$id_product);
         }
     }
@@ -34,7 +38,7 @@ if($_GET['action'] == "save"){
         $statusmessage = true;
         $infomesssage ="مبلغ محصول باید عدد باشد";
     }else{
-        if($product['price_product'] != $name_product){
+        if($product['price_product'] != $price_product){
             update("product","price_product",$price_product,"id",$id_product);
         }
     }
@@ -161,7 +165,17 @@ if($_GET['action'] == "save"){
                                     <div class="form-group">
                                         <label class="col-lg-2 control-label">دسته بندی</label>
                                         <div class="col-lg-7">
-                                            <input value = "<?php echo $product['category'];?>" type="text" name = "category" class="form-control input-sm m-bot15">
+                                            <select name = "category" class="form-control input-sm m-bot15">
+                                                <option value="">بدون دسته بندی</option>
+                                                <?php
+                                                if(count($listcategory) > 0){
+                                                    foreach($listcategory as $cat){
+                                                        $selected = ($product['category'] == $cat['remark']) ? 'selected' : '';
+                                                        echo "<option value=\"{$cat['remark']}\" {$selected}>{$cat['remark']}</option>";
+                                                    }
+                                                }
+                                                ?>
+                                            </select>
                                         </div>
                                     </div>
                                     <div class="form-group">

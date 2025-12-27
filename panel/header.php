@@ -68,6 +68,12 @@
                       </a>
                   </li>
                   <li>
+                      <a href="category.php">
+                          <i class="icon-folder"></i>
+                          <span>دسته</span>
+                      </a>
+                  </li>
+                  <li>
                       <a href="payment.php">
                           <i class="icon-credit-card"></i>
                           <span>تراکنش ها</span>
