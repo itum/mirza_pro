@@ -1,58 +1,118 @@
 <?php
 session_start();
+ini_set('error_log', 'error_log');
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../function.php';
-$query = $pdo->prepare("SELECT * FROM admin WHERE username=:username");
+
+// Check session first before any database queries
+if( !isset($_SESSION["user"]) ){
+    header('Location: login.php');
+    exit;
+}
+
+try {
+    $query = $pdo->prepare("SELECT * FROM admin WHERE username=:username");
     $query->bindParam("username", $_SESSION["user"], PDO::PARAM_STR);
     $query->execute();
     $result = $query->fetch(PDO::FETCH_ASSOC);
+    
+    if(!$result){
+        header('Location: login.php');
+        exit;
+    }
+    
     $query = $pdo->prepare("SELECT * FROM product");
     $query->execute();
     $listinvoice = $query->fetchAll();
+    
     $query = $pdo->prepare("SELECT * FROM marzban_panel");
     $query->execute();
     $listpanel = $query->fetchAll();
-if( !isset($_SESSION["user"]) || !$result ){
-    header('Location: login.php');
-    return;
+} catch (PDOException $e) {
+    error_log("Database error in product.php (initial queries): " . $e->getMessage());
+    die("خطا در اتصال به پایگاه داده");
 }
 $nameProduct = $_POST['nameproduct'] ?? null;
 if(!empty($nameProduct)){
-    $randomString = bin2hex(random_bytes(2));
-    $userdata['data_limit_reset'] = "no_reset";
-    $product = select("product","*","name_product",$nameProduct,"count");
-    if($product != 0){
-        echo "alert(\"محصول از قبل وجود دارد\")";
-        return;
+    try {
+        $randomString = bin2hex(random_bytes(2));
+        $userdata['data_limit_reset'] = "no_reset";
+        $product = select("product","*","name_product",$nameProduct,"count");
+        if($product != 0){
+            $_SESSION['error_message'] = "محصول از قبل وجود دارد";
+            header("Location: product.php");
+            exit;
+        }
+        $hidepanel = "{}";
+        $priceProduct = $_POST['price_product'] ?? '';
+        $volumeProduct = $_POST['volume_product'] ?? '';
+        $timeProduct = $_POST['time_product'] ?? '';
+        $location = $_POST['namepanel'] ?? '';
+        $agent = $_POST['agent_product'] ?? '';
+        $category = $_POST['cetegory_product'] ?? '';
+        $note = $_POST['note_product'] ?? '';
+        
+        $stmt = $pdo->prepare("INSERT IGNORE INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (:name_product,:code_product,:price_product,:Volume_constraint,:Service_time,:Location,:agent,:data_limit_reset,:note,:category,:hide_panel,'0')");
+        $stmt->bindValue(':name_product', $nameProduct, PDO::PARAM_STR);
+        $stmt->bindValue(':code_product', $randomString, PDO::PARAM_STR);
+        $stmt->bindValue(':price_product', $priceProduct, PDO::PARAM_STR);
+        $stmt->bindValue(':Volume_constraint', $volumeProduct, PDO::PARAM_STR);
+        $stmt->bindValue(':Service_time', $timeProduct, PDO::PARAM_STR);
+        $stmt->bindValue(':Location', $location, PDO::PARAM_STR);
+        $stmt->bindValue(':agent', $agent, PDO::PARAM_STR);
+        $stmt->bindValue(':data_limit_reset', $userdata['data_limit_reset'], PDO::PARAM_STR);
+        $stmt->bindValue(':category', $category, PDO::PARAM_STR);
+        $stmt->bindValue(':note', $note, PDO::PARAM_STR);
+        $stmt->bindValue(':hide_panel', $hidepanel, PDO::PARAM_STR);
+        $stmt->execute();
+        $_SESSION['success_message'] = "محصول با موفقیت اضافه شد";
+        header("Location: product.php");
+        exit;
+    } catch (PDOException $e) {
+        error_log("Database error in product.php (add product): " . $e->getMessage());
+        $_SESSION['error_message'] = "خطا در افزودن محصول: " . $e->getMessage();
+        header("Location: product.php");
+        exit;
+    } catch (Exception $e) {
+        error_log("General error in product.php (add product): " . $e->getMessage());
+        $_SESSION['error_message'] = "خطا در افزودن محصول";
+        header("Location: product.php");
+        exit;
     }
-    $hidepanel = "{}";
-    $stmt = $pdo->prepare("INSERT IGNORE INTO product (name_product,code_product,price_product,Volume_constraint,Service_time,Location,agent,data_limit_reset,note,category,hide_panel,one_buy_status) VALUES (:name_product,:code_product,:price_product,:Volume_constraint,:Service_time,:Location,:agent,:data_limit_reset,:note,:category,:hide_panel,'0')");
-    $stmt->bindParam(':name_product', $nameProduct, PDO::PARAM_STR);
-    $stmt->bindParam(':code_product', $randomString);
-    $stmt->bindParam(':price_product', $_POST['price_product'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':Volume_constraint', $_POST['volume_product'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':Service_time', $_POST['time_product'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':Location', $_POST['namepanel'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':agent', $_POST['agent_product'] ?? '', PDO::PARAM_STR);
-    $stmt->bindParam(':data_limit_reset', $userdata['data_limit_reset']);
-    $stmt->bindParam(':category', $_POST['cetegory_product'] ?? ''  , PDO::PARAM_STR);
-    $stmt->bindParam(':note', $_POST['note_product'] ?? ''  , PDO::PARAM_STR);
-    $stmt->bindParam(':hide_panel', $hidepanel);
-    $stmt->execute();
-    header("Location: product.php");
 }
 if(isset($_GET['oneproduct'], $_GET['toweproduct']) && $_GET['oneproduct'] !== '' && $_GET['toweproduct'] !== ''){
-    update("product", "id", 10000, "id", $_GET['oneproduct']);
-    update("product", "id", intval($_GET['oneproduct']), "id", intval($_GET['toweproduct']));
-    update("product", "id", intval($_GET['toweproduct']), "id", 10000);
-    header("Location: product.php");
+    try {
+        update("product", "id", 10000, "id", $_GET['oneproduct']);
+        update("product", "id", intval($_GET['oneproduct']), "id", intval($_GET['toweproduct']));
+        update("product", "id", intval($_GET['toweproduct']), "id", 10000);
+        $_SESSION['success_message'] = "محصولات با موفقیت جابجا شدند";
+        header("Location: product.php");
+        exit;
+    } catch (Exception $e) {
+        error_log("Error in product.php (swap products): " . $e->getMessage());
+        $_SESSION['error_message'] = "خطا در جابجایی محصولات";
+        header("Location: product.php");
+        exit;
+    }
 }
 
 if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
-    $stmt = $connect->prepare("DELETE FROM product WHERE id = ?");
-    $stmt->bind_param("s", $_GET['removeid']);
-    $stmt->execute();
-    header("Location: product.php");
+    try {
+        $removeId = intval($_GET['removeid']);
+        $stmt = $pdo->prepare("DELETE FROM product WHERE id = :id");
+        $stmt->bindParam(':id', $removeId, PDO::PARAM_INT);
+        $stmt->execute();
+        $_SESSION['success_message'] = "محصول با موفقیت حذف شد";
+        header("Location: product.php");
+        exit;
+    } catch (PDOException $e) {
+        error_log("Database error in product.php (remove product): " . $e->getMessage());
+        $_SESSION['error_message'] = "خطا در حذف محصول";
+        header("Location: product.php");
+        exit;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -103,6 +163,22 @@ if(isset($_GET['removeid']) && $_GET['removeid'] !== ''){
                                 <a href="#addproduct" data-toggle="modal"  class="btn btn-info  btn-sm">اضافه کردن محصول</a>
                                 <a href="#moveradif" data-toggle="modal"  class="btn btn-success  btn-sm">جابه جایی ردیف محصول</a>
                         </section>
+                        <?php
+                        if(isset($_SESSION['error_message'])){
+                            echo '<div class="alert alert-danger alert-dismissible" role="alert">
+                                    <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                                    ' . htmlspecialchars($_SESSION['error_message'], ENT_QUOTES, 'UTF-8') . '
+                                  </div>';
+                            unset($_SESSION['error_message']);
+                        }
+                        if(isset($_SESSION['success_message'])){
+                            echo '<div class="alert alert-success alert-dismissible" role="alert">
+                                    <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                                    ' . htmlspecialchars($_SESSION['success_message'], ENT_QUOTES, 'UTF-8') . '
+                                  </div>';
+                            unset($_SESSION['success_message']);
+                        }
+                        ?>
                             <table class="table table-striped border-top" id="sample_1">
                                 <thead>
                                     <tr>
