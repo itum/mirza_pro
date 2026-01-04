@@ -316,7 +316,7 @@ if (in_array($text, $textadmin) || $datain == "admin") {
     $stmt2 = $pdo->prepare("SELECT COUNT(DISTINCT id_user) as count FROM `invoice` WHERE Status != 'Unpaid'");
     $stmt2->execute();
     $statisticsorder = $stmt2->fetch(PDO::FETCH_ASSOC)['count'];
-    $sqlsum = "SELECT SUM(price) AS sumpay , Payment_Method,COUNT(price) AS countpay FROM Payment_report WHERE payment_Status = 'paid' AND Payment_Method NOT IN ('add balance by admin','low balance by admin') GROUP BY  Payment_Method;";
+    $sqlsum = "SELECT SUM(price) AS sumpay , Payment_Method,COUNT(price) AS countpay FROM Payment_report WHERE payment_Status = 'paid' AND Payment_Method NOT IN ('add balance by admin','low balance by admin') AND (exclude_from_statistics = FALSE OR exclude_from_statistics IS NULL) AND id_order NOT IN (SELECT id_order FROM statistics_excluded) GROUP BY  Payment_Method;";
     $stmt = $pdo->prepare($sqlsum);
     $stmt->execute();
     $statispay = $stmt->fetchAll();
@@ -12082,16 +12082,31 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
     // نمایش آمار بدون آمار
     require_once __DIR__ . '/jdf.php';
     $current_month = getJalaliMonth();
-    $sql = "SELECT * FROM statistics_excluded ORDER BY time DESC LIMIT 50";
+    
+    // محاسبه تعداد کل و جمع کل
+    $sql = "SELECT COUNT(*) as count, SUM(CAST(price AS UNSIGNED)) as sum FROM statistics_excluded";
     $stmt = $pdo->prepare($sql);
     $stmt->execute();
-    $excluded_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $excluded_count = count($excluded_list);
-    $excluded_sum = 0;
-    foreach ($excluded_list as $item) {
-        $excluded_sum += floatval($item['price']);
-    }
-    $excluded_sum = number_format($excluded_sum, 0);
+    $excluded_stat = $stmt->fetch(PDO::FETCH_ASSOC);
+    $excluded_count = intval($excluded_stat['count'] ?? 0);
+    $excluded_sum = number_format(floatval($excluded_stat['sum'] ?? 0), 0);
+    
+    // محاسبه تفکیک درگاه‌های پرداخت
+    $sql_gateway = "SELECT pr.Payment_Method, COUNT(se.id_order) as countpay, SUM(CAST(se.price AS UNSIGNED)) as sumpay 
+                    FROM statistics_excluded se 
+                    INNER JOIN Payment_report pr ON se.id_order = pr.id_order 
+                    WHERE pr.Payment_Method NOT IN ('add balance by admin','low balance by admin')
+                    GROUP BY pr.Payment_Method";
+    $stmt_gateway = $pdo->prepare($sql_gateway);
+    $stmt_gateway->execute();
+    $excluded_gateways = $stmt_gateway->fetchAll(PDO::FETCH_ASSOC);
+    
+    // لیست آخرین پرداخت‌ها
+    $sql_list = "SELECT * FROM statistics_excluded ORDER BY time DESC LIMIT 50";
+    $stmt_list = $pdo->prepare($sql_list);
+    $stmt_list->execute();
+    $excluded_list = $stmt_list->fetchAll(PDO::FETCH_ASSOC);
+    
     $text = "🚫 <b>آمار بدون آمار</b>
 ━━━━━━━━━━━━━━━━━━
 📊 <b>تعداد کل:</b> <code>$excluded_count</code> عدد
@@ -12099,7 +12114,34 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
 
 📅 <b>ماه جاری:</b> $current_month
 ";
-    if ($excluded_count > 0) {
+    
+    // نمایش تفکیک درگاه‌های پرداخت
+    if (count($excluded_gateways) > 0) {
+        $text .= "\n";
+        foreach ($excluded_gateways as $gateway) {
+            $status_var = [
+                'cart to cart' => $datatextbot['carttocart'],
+                'aqayepardakht' => $datatextbot['aqayepardakht'],
+                'zarinpal' => $datatextbot['zarinpal'],
+                'plisio' => $datatextbot['textnowpayment'],
+                'arze digital offline' => $datatextbot['textnowpaymenttron'],
+                'Currency Rial 1' => $datatextbot['iranpay2'],
+                'Currency Rial 2' => $datatextbot['iranpay3'],
+                'Currency Rial 3' => $datatextbot['iranpay1'],
+                'paymentnotverify' => $datatextbot['textpaymentnotverify'],
+                'Star Telegram' => $datatextbot['text_star_telegram']
+            ][$gateway['Payment_Method']] ?? $gateway['Payment_Method'];
+            
+            $gateway_sum = number_format(floatval($gateway['sumpay'] ?? 0), 0);
+            $text .= "
+📌 نام درگاه : <code>$status_var</code>
+ - تعداد پرداخت موفق : <code>{$gateway['countpay']}</code>
+ - جمع پرداختی ها : <code>$gateway_sum</code>\n";
+        }
+    }
+    
+    // نمایش آخرین پرداخت‌ها
+    if (count($excluded_list) > 0) {
         $text .= "\n📋 <b>آخرین پرداخت‌های بدون آمار:</b>\n";
         $counter = 1;
         foreach (array_slice($excluded_list, 0, 10) as $item) {
@@ -12107,10 +12149,11 @@ if ($datain == "settimecornday" && $adminrulecheck['rule'] == "administrator") {
             $text .= "$counter. کاربر: <code>{$item['id_user']}</code> - مبلغ: $price_formatted تومان\n";
             $counter++;
         }
-        if ($excluded_count > 10) {
-            $text .= "\n... و " . ($excluded_count - 10) . " مورد دیگر";
+        if (count($excluded_list) > 10) {
+            $text .= "\n... و " . (count($excluded_list) - 10) . " مورد دیگر";
         }
     }
+    
     Editmessagetext($from_id, $message_id, $text, $keyboard_stat, 'HTML');
 } elseif ($datain == "manage_expenses") {
     // منوی مدیریت هزینه‌ها
