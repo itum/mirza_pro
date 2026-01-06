@@ -7391,7 +7391,17 @@ if ($datain == "settimecornremove" && $adminrulecheck['rule'] == "administrator"
     update("Requestagent", "type", $defaultAgentType, "id", $id_user);
     update("user", "agent", $defaultAgentType, "id", $id_user);
     update("user", "expire", null, "id", $id_user);
-    sendmessage($id_user, "✅ کاربر گرامی با درخواست نمایندگی شما موافقت و شما نماینده شدید.", null, 'HTML');
+    
+    // بررسی تنظیمات شارژ کیف پول از مبلغ ورودی
+    if ($setting['agentreqprice_charge_balance'] == "onchargeagent" && intval($setting['agentreqprice']) > 0) {
+        $agent_user = select("user", "*", "id", $id_user, "select");
+        $newBalance = intval($agent_user['Balance']) + intval($setting['agentreqprice']);
+        update("user", "Balance", $newBalance, "id", $id_user);
+        $priceFormatted = number_format($setting['agentreqprice'], 0);
+        sendmessage($id_user, "✅ کاربر گرامی با درخواست نمایندگی شما موافقت و شما نماینده شدید.\n\n💎 مبلغ <b>$priceFormatted</b> تومان به عنوان شارژ کیف پول به موجودی شما اضافه شد.", null, 'HTML');
+    } else {
+        sendmessage($id_user, "✅ کاربر گرامی با درخواست نمایندگی شما موافقت و شما نماینده شدید.", null, 'HTML');
+    }
     sendmessage($from_id, $textbotlang['Admin']['agent']['useragented'], $keyboardadmin, 'HTML');
     $agentTypeButtons = [];
     foreach ($agentTypeLabels as $typeCode => $label) {
@@ -9587,6 +9597,17 @@ f,n.n2", $backadmin, 'HTML');
     sendmessage($from_id, "✅ تغییرات با موفقیت ذخیره گردید", $setting_panel, 'HTML');
     step("home", $from_id);
     update("setting", "agentreqprice", $text, null, null);
+} elseif ($text == "💎 شارژ کیف پول نماینده از مبلغ ورودی" && $adminrulecheck['rule'] == "administrator") {
+    $currentStatus = $setting['agentreqprice_charge_balance'];
+    if ($currentStatus == "onchargeagent") {
+        $newStatus = "offchargeagent";
+        $statusText = "غیرفعال";
+    } else {
+        $newStatus = "onchargeagent";
+        $statusText = "فعال";
+    }
+    update("setting", "agentreqprice_charge_balance", $newStatus, null, null);
+    sendmessage($from_id, "✅ تنظیمات شارژ کیف پول نماینده از مبلغ ورودی به حالت <b>$statusText</b> تغییر یافت.", $setting_panel, 'HTML');
 } elseif ($text == "🤖 تایید رسید  بدون بررسی" && $adminrulecheck['rule'] == "administrator") {
     $paymentverify = select("PaySetting", "ValuePay", "NamePay", "statuscardautoconfirm", "select")['ValuePay'];
     if ($paymentverify == "onautoconfirm") {
