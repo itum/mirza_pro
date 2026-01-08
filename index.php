@@ -6846,7 +6846,20 @@ $text_porsant
 } elseif ($text == $datatextbot['textrequestagent'] || $datain == "requestagent") {
     if ($user['Balance'] < $setting['agentreqprice']) {
         $priceagent = number_format($setting['agentreqprice']);
-        sendmessage($from_id, sprintf($textbotlang['users']['agenttext']['insufficientbalanceagent'], $priceagent), $backuser, 'HTML');
+        $insufficientKeyboard = [
+            'inline_keyboard' => [
+                [
+                    ['text' => $datatextbot['text_Add_Balance'], 'callback_data' => "Add_Balance"]
+                ]
+            ]
+        ];
+        if (!empty($setting['id_support']) && $setting['id_support'] != "0") {
+            $insufficientKeyboard['inline_keyboard'][] = [
+                ['text' => "💬 پشتیبانی", 'url' => "https://t.me/{$setting['id_support']}"]
+            ];
+        }
+        $insufficientKeyboardJson = json_encode($insufficientKeyboard);
+        sendmessage($from_id, sprintf($textbotlang['users']['agenttext']['insufficientbalanceagent'], $priceagent), $insufficientKeyboardJson, 'HTML');
         return;
     }
     $countagentrequest = select("Requestagent", "*", "id", $from_id, "count");
